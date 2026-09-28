@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The only dangerous permission Shuttr requests (docs/ARCHITECTURE.md
+         "Permissions & privacy"). Import uses the Android Photo Picker and
+         save uses MediaStore, neither needs a storage permission on API 29+. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <application
         android:label="shuttr"
         android:name="${applicationName}"

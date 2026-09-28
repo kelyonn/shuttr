@@ -6,6 +6,9 @@ docs/
 # Reference photos (real digicam shots for LUT building) — too large/private for git
 reference/
 
+# Local Python env for tool/ scripts (LUT building, texture generation)
+.venv-tools/
+
 # Miscellaneous
 *.class
 *.log

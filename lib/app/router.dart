@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shuttr/features/looks/tuning/tuning_screen.dart';
 
 /// Top-level route paths.
 ///
@@ -32,8 +33,7 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: AppRoutes.debugTuning,
-      builder: (context, state) =>
-          const _PlaceholderScreen(title: 'Tuning (debug)'),
+      builder: (context, state) => const TuningScreen(),
     ),
   ],
 );

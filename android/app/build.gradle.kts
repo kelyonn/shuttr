@@ -47,3 +47,9 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // CodecPlugin.kt: EXIF orientation reading + coroutines for off-main-thread decode/encode.
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+}
