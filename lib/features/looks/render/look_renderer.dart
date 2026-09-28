@@ -3,10 +3,10 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:shuttr/core/platform/codec_channel.dart';
 import 'package:shuttr/features/looks/date_stamp.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
+import 'package:shuttr/features/looks/render/asset_image_cache.dart';
 import 'package:shuttr/features/looks/render/frame_composite.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
 
@@ -29,8 +29,6 @@ class LookRenderer {
   final CodecChannel _codec;
 
   static ui.FragmentProgram? _lookProgramCache;
-  static final Map<String, ui.Image> _lutCache = {};
-  static final Map<String, ui.Image> _frameCache = {};
 
   Future<RenderResult> render({
     required String sourcePath,
@@ -63,7 +61,9 @@ class LookRenderer {
     // once tuned against reference shots (docs/LOOKS.md).
     final bloomSource = await _blur(cropped, sigma: 16, downscale: 4);
 
-    final lut = await _loadLut(spec.lutAsset);
+    final lut = await AssetImageCache.load(
+      spec.lutAsset ?? 'assets/luts/identity.png',
+    );
 
     final graded = await _applyLookShader(
       image: cropped,
@@ -183,33 +183,6 @@ class LookRenderer {
     return image;
   }
 
-  Future<ui.Image> _loadLut(String? assetPath) async {
-    final path = assetPath ?? 'assets/luts/identity.png';
-    final cached = _lutCache[path];
-    if (cached != null) return cached;
-
-    final bytes = await rootBundle.load(path);
-    final codec = await ui.instantiateImageCodec(
-      bytes.buffer.asUint8List(),
-    );
-    final frame = await codec.getNextFrame();
-    _lutCache[path] = frame.image;
-    return frame.image;
-  }
-
-  Future<ui.Image> _loadFrame(String assetPath) async {
-    final cached = _frameCache[assetPath];
-    if (cached != null) return cached;
-
-    final bytes = await rootBundle.load(assetPath);
-    final codec = await ui.instantiateImageCodec(
-      bytes.buffer.asUint8List(),
-    );
-    final frame = await codec.getNextFrame();
-    _frameCache[assetPath] = frame.image;
-    return frame.image;
-  }
-
   /// Composites the look's frame asset (if any) and date stamp (if enabled)
   /// onto [image]. Returns [image] itself, untouched, when neither applies
   /// — the common case (free looks, no date stamp by default) skips the
@@ -231,7 +204,7 @@ class LookRenderer {
     var canvasSize = ui.Size(photoW, photoH);
     var windowRect = ui.Rect.fromLTWH(0, 0, photoW, photoH);
     if (frameAsset != null) {
-      frame = await _loadFrame(frameAsset);
+      frame = await AssetImageCache.load(frameAsset);
       canvasSize = frameCanvasSize(photoWidth: photoW, photoHeight: photoH);
       windowRect = frameWindowRect(photoWidth: photoW, photoHeight: photoH);
     }
