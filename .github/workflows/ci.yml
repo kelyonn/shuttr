@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter analyze
+
+      # No ad SDKs, ever (docs/CLAUDE.md rule 1). Fails the build if one sneaks
+      # into pubspec.yaml.
+      - name: Guard against ad SDKs
+        run: |
+          if grep -Ei '(admob|unity_ads|applovin|ironsource|facebook_audience|vungle|chartboost)' pubspec.yaml; then
+            echo "Ad SDK dependency found — Shuttr never ships ads." >&2
+            exit 1
+          fi
+
+      - run: flutter test

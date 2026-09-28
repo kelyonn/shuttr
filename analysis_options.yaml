@@ -1,0 +1,15 @@
+include: package:very_good_analysis/analysis_options.yaml
+
+linter:
+  rules:
+    # Docstrings on every public member are noise for a solo, fast-moving
+    # project — the docs/ folder and code comments carry intent instead.
+    public_member_api_docs: false
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - build/**
+    - android/**
+    - ios/**

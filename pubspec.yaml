@@ -1,0 +1,48 @@
+name: shuttr
+description: "The digicam you never had, in your pocket."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  camera: ^0.12.1
+  firebase_analytics: ^12.6.0
+  firebase_core: ^4.15.0
+  firebase_crashlytics: ^5.4.0
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.4.3
+  gal: ^2.3.3
+  go_router: ^18.0.1
+  image_picker: ^1.2.3
+  in_app_review: ^2.0.12
+  path_provider: ^2.1.6
+  purchases_flutter: ^10.13.2
+  screen_brightness: ^2.1.11
+  share_plus: ^13.3.0
+  shared_preferences: ^2.5.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: ^11.0.0
+flutter:
+  uses-material-design: true
+
+  shaders:
+    - shaders/look.frag
+    - shaders/preview.frag
+
+  assets:
+    - assets/luts/
+    - assets/textures/
+    - assets/frames/
+
+  # DSEG7 date-stamp font is added in S8 once assets/fonts/DSEG7Classic-Regular.ttf
+  # exists (see docs/BUILD_PLAN.md). Declaring it before the file exists breaks the build.
+  # fonts:
+  #   - family: DSEG7Classic
+  #     fonts:
+  #       - asset: assets/fonts/DSEG7Classic-Regular.ttf
