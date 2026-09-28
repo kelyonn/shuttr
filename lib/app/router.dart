@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shuttr/features/camera/camera_screen.dart';
 import 'package:shuttr/features/looks/tuning/tuning_screen.dart';
 
 /// Top-level route paths.
 ///
 /// Real screens land feature-by-feature per docs/BUILD_PLAN.md:
-/// - `/camera`  → S13 (camera screen)
+/// - `/camera`  → S13, done (camera screen)
 /// - `/gallery` → S18 (in-app gallery)
 /// - `/settings` → S17
 /// - `/debug/tuning` → S5, kDebugMode only
@@ -21,7 +22,7 @@ final appRouter = GoRouter(
   routes: [
     GoRoute(
       path: AppRoutes.camera,
-      builder: (context, state) => const _PlaceholderScreen(title: 'Camera'),
+      builder: (context, state) => const CameraScreen(),
     ),
     GoRoute(
       path: AppRoutes.gallery,
