@@ -62,6 +62,28 @@ void main() {
     expect(stamped.encodedRgba.single, isNot(plain.encodedRgba.single));
   });
 
+  test('mirror flips the output relative to unmirrored', () async {
+    final plain = FakeCodecChannel();
+    await LookRenderer(codec: plain).render(
+      sourcePath: 'fake.jpg',
+      spec: identityLook,
+      outPath: '${tempDir.path}/plain.jpg',
+      seed: 1,
+    );
+
+    final mirrored = FakeCodecChannel();
+    await LookRenderer(codec: mirrored).render(
+      sourcePath: 'fake.jpg',
+      spec: identityLook,
+      outPath: '${tempDir.path}/mirrored.jpg',
+      seed: 1,
+      mirror: true,
+    );
+
+    expect(mirrored.encodedSizes.single, plain.encodedSizes.single);
+    expect(mirrored.encodedRgba.single, isNot(plain.encodedRgba.single));
+  });
+
   test('a frameAsset grows the canvas by the frame margins', () async {
     final codec = FakeCodecChannel();
     final renderer = LookRenderer(codec: codec);

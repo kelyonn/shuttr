@@ -59,6 +59,25 @@ class DateStampSettings {
     'colorStyle': colorStyle.name,
     if (yearOverride != null) 'yearOverride': yearOverride,
   };
+
+  DateStampSettings copyWith({
+    bool? enabled,
+    DateStampFormat? format,
+    DateStampPosition? position,
+    DateStampColorStyle? colorStyle,
+    int? yearOverride,
+    bool clearYearOverride = false,
+  }) {
+    return DateStampSettings(
+      enabled: enabled ?? this.enabled,
+      format: format ?? this.format,
+      position: position ?? this.position,
+      colorStyle: colorStyle ?? this.colorStyle,
+      yearOverride: clearYearOverride
+          ? null
+          : (yearOverride ?? this.yearOverride),
+    );
+  }
 }
 
 /// Formats `date` per `settings.format`, substituting

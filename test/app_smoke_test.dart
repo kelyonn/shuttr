@@ -1,7 +1,9 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuttr/app/app.dart';
+import 'package:shuttr/features/settings/settings_repository.dart';
 
 void main() {
   // No real camera hardware under `flutter test` — stub the `camera`
@@ -18,6 +20,7 @@ void main() {
       if (call.method == 'availableCameras') return <Object?>[];
       return null;
     });
+    SharedPreferences.setMockInitialValues({});
   });
 
   tearDown(() {
@@ -28,7 +31,13 @@ void main() {
   });
 
   testWidgets('app boots to the camera screen', (tester) async {
-    await tester.pumpWidget(const ProviderScope(child: ShuttrApp()));
+    final prefs = await SharedPreferences.getInstance();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        child: const ShuttrApp(),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // No cameras in the test environment, so CameraScreen settles on its

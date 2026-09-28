@@ -58,6 +58,8 @@ class CaptureService {
     required CameraController controller,
     required LookSpec spec,
     required bool flashFired,
+    bool mirror = false,
+    DateStampSettings? dateStampOverride,
     Future<void> Function()? beforeCapture,
     Future<void> Function()? afterCapture,
   }) async {
@@ -71,9 +73,13 @@ class CaptureService {
     await File(captured.path).copy(originalPath);
 
     final outPath = '${tempDir.path}/shuttr_rendered_$id.jpg';
-    final dateStamp = spec.dateStampDefaultOn
-        ? const DateStampSettings(enabled: true)
-        : null;
+    // A Settings override (S17) applies to every look; otherwise each look
+    // decides its own default (docs/LOOKS.md).
+    final dateStamp =
+        dateStampOverride ??
+        (spec.dateStampDefaultOn
+            ? const DateStampSettings(enabled: true)
+            : null);
     final seed = math.Random().nextDouble() * 1000;
 
     final renderFuture = _renderer
@@ -84,6 +90,7 @@ class CaptureService {
           flashFired: flashFired,
           seed: seed,
           dateStamp: dateStamp,
+          mirror: mirror,
         )
         .then(
           (result) => CaptureResult(
