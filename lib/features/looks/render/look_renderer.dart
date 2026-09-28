@@ -38,6 +38,7 @@ class LookRenderer {
     double? seed,
     DateStampSettings? dateStamp,
     DateTime? captureDate,
+    bool mirror = false,
   }) async {
     final stopwatch = Stopwatch()..start();
 
@@ -51,7 +52,7 @@ class LookRenderer {
       decoded.height,
     );
 
-    final cropped = _cropToAspect(source, spec.aspectRatio);
+    final cropped = _cropToAspect(source, spec.aspectRatio, mirror: mirror);
     source.dispose();
 
     final blurSmall = await _blur(cropped, sigma: 2.5);
@@ -129,7 +130,11 @@ class LookRenderer {
     return completer.future;
   }
 
-  ui.Image _cropToAspect(ui.Image src, double aspectRatio) {
+  ui.Image _cropToAspect(
+    ui.Image src,
+    double aspectRatio, {
+    bool mirror = false,
+  }) {
     final srcW = src.width.toDouble();
     final srcH = src.height.toDouble();
     final srcAspect = srcW / srcH;
@@ -146,6 +151,13 @@ class LookRenderer {
 
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
+    // "Mirror front photos" (Settings, S17): save the selfie the way it
+    // looked in the viewfinder rather than how others see it.
+    if (mirror) {
+      canvas
+        ..translate(cropW, 0)
+        ..scale(-1, 1);
+    }
     final srcRect = ui.Rect.fromLTWH(left, top, cropW, cropH);
     final dstRect = ui.Rect.fromLTWH(0, 0, cropW, cropH);
     canvas.drawImageRect(src, srcRect, dstRect, ui.Paint());

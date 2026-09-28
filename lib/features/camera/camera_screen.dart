@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shuttr/app/router.dart';
 import 'package:shuttr/app/theme.dart';
 import 'package:shuttr/features/camera/body/lcd_frame.dart';
 import 'package:shuttr/features/camera/body/look_mode_dial.dart';
@@ -15,6 +17,7 @@ import 'package:shuttr/features/looks/look_registry.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
 import 'package:shuttr/features/looks/render/asset_image_cache.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
+import 'package:shuttr/features/settings/settings_repository.dart';
 
 /// S13/S14/S16: the real camera screen. Owns app-lifecycle wiring
 /// (pause/resume the camera when backgrounded), the current look for the
@@ -94,18 +97,20 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
       final camState = ref.read(cameraControllerProvider).value;
       if (camState == null) return;
 
-      final useScreenFlash =
-          camState.lensDirection == CameraLensDirection.front &&
-          _frontScreenFlashOn;
+      final isFront = camState.lensDirection == CameraLensDirection.front;
+      final useScreenFlash = isFront && _frontScreenFlashOn;
       final flashFired =
           _mirrorSelfieMode ||
           camState.flashMode != FlashMode.off ||
           useScreenFlash;
+      final settings = ref.read(settingsProvider);
 
       final pending = await _captureService.capture(
         controller: camState.controller,
         spec: _selectedLook,
         flashFired: flashFired,
+        mirror: isFront && settings.mirrorFrontPhotos,
+        dateStampOverride: settings.dateStampOverride,
         beforeCapture: useScreenFlash ? _screenFlash.engage : null,
         afterCapture: useScreenFlash ? _screenFlash.disengage : null,
       );
@@ -212,9 +217,19 @@ class _CameraReady extends StatelessWidget {
         Positioned(
           top: 16,
           left: 16,
-          child: _RoundIconButton(
-            icon: Icons.palette_outlined,
-            onPressed: onToggleBodyTheme,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _RoundIconButton(
+                icon: Icons.palette_outlined,
+                onPressed: onToggleBodyTheme,
+              ),
+              const SizedBox(width: 12),
+              _RoundIconButton(
+                icon: Icons.settings_outlined,
+                onPressed: () => context.push(AppRoutes.settings),
+              ),
+            ],
           ),
         ),
         Positioned(

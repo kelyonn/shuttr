@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:shuttr/core/platform/codec_channel.dart';
 
 /// In-memory fake for [CodecChannel] so render-pipeline logic can be unit
-/// tested without a device. Produces a flat mid-grey image of the requested
-/// size rather than decoding a real file, and "encodes" by writing a tiny
+/// tested without a device. Produces a left-dark/right-light gradient of
+/// the requested size (not flat, so a horizontal mirror is observable in
+/// tests) rather than decoding a real file, and "encodes" by writing a tiny
 /// placeholder file (not a real JPEG) so callers can assert a file exists.
 class FakeCodecChannel implements CodecChannel {
   new();
@@ -21,11 +22,15 @@ class FakeCodecChannel implements CodecChannel {
     const width = 64;
     const height = 48;
     final rgba = Uint8List(width * height * 4);
-    for (var i = 0; i < rgba.length; i += 4) {
-      rgba[i] = 128;
-      rgba[i + 1] = 128;
-      rgba[i + 2] = 128;
-      rgba[i + 3] = 255;
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final i = (y * width + x) * 4;
+        final value = (x * 255 / (width - 1)).round();
+        rgba[i] = value;
+        rgba[i + 1] = value;
+        rgba[i + 2] = value;
+        rgba[i + 3] = 255;
+      }
     }
     return DecodedImage(rgba: rgba, width: width, height: height);
   }

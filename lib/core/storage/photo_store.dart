@@ -91,4 +91,26 @@ class PhotoStore {
 
     return meta;
   }
+
+  /// Total size of everything in `originals/` — what "Clear originals" in
+  /// Settings (S17) frees up. `photos/` and `meta/` are left alone; the
+  /// gallery already has its own copy of the rendered photo via `gal`.
+  Future<int> originalsSizeBytes() async {
+    final dir = await _dir('originals');
+    var total = 0;
+    await for (final entity in dir.list()) {
+      if (entity is File) total += await entity.length();
+    }
+    return total;
+  }
+
+  /// Deletes every file in `originals/`. Re-develop (S18) needs an original
+  /// to work from, so this trades that away for the freed storage — the
+  /// Settings copy makes that trade-off explicit to the user.
+  Future<void> clearOriginals() async {
+    final dir = await _dir('originals');
+    await for (final entity in dir.list()) {
+      if (entity is File) await entity.delete();
+    }
+  }
 }
