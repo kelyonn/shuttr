@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
+import 'package:shuttr/core/storage/photo_store.dart';
 import 'package:shuttr/features/camera/capture_service.dart';
 
 /// The "developing" review screen (S14): shows a short animation while the
@@ -18,6 +19,8 @@ class ReviewScreen extends StatefulWidget {
 }
 
 class _ReviewScreenState extends State<ReviewScreen> {
+  final _photoStore = PhotoStore();
+
   CaptureResult? _result;
   Object? _renderError;
   bool _saving = false;
@@ -55,10 +58,13 @@ class _ReviewScreenState extends State<ReviewScreen> {
         _showSnack('Allow photo access in Settings to save.');
         return;
       }
-      await Gal.putImage(result.renderedPath, album: 'Shuttr');
-      // The original stays in the temp dir for now — S15 adds the
-      // permanent originals/meta layout re-develop and the in-app gallery
-      // need; today's save is gallery-only.
+      await _photoStore.save(
+        originalCapturePath: result.originalPath,
+        renderedPath: result.renderedPath,
+        spec: result.spec,
+        seed: result.seed,
+        dateStamp: result.dateStamp,
+      );
       await _deleteTempFiles();
       if (mounted) Navigator.of(context).pop();
     } on GalException catch (error) {

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,25 +19,35 @@ class PendingCapture {
   final Future<CaptureResult> renderFuture;
 }
 
+/// Everything `PhotoStore.save` (S15) needs to persist this capture
+/// permanently, plus what the review screen shows meanwhile.
 class CaptureResult {
   const new({
     required this.originalPath,
     required this.renderedPath,
     required this.renderMs,
+    required this.spec,
+    required this.seed,
+    this.dateStamp,
   });
 
   final String originalPath;
   final String renderedPath;
   final int renderMs;
+  final LookSpec spec;
+
+  /// The seed used for this render's grain/light-leak randomisation —
+  /// generated here (rather than left to [LookRenderer]'s default) so it
+  /// can be persisted and a re-develop can reproduce the same result.
+  final double seed;
+  final DateStampSettings? dateStamp;
 }
 
 /// Turns a shutter press into a capture: takes the photo (optionally behind
 /// a screen-flash sequence via `beforeCapture`/`afterCapture`), writes the
 /// original immediately, then kicks off the look render without waiting
-/// for it.
-///
-/// Storage here is temporary (app temp dir) — S15 replaces this with the
-/// permanent `photos/`/`originals/`/`meta/` layout and gallery save.
+/// for it. Both files land in the temp dir — the review screen's Save
+/// action hands them to `PhotoStore` (S15) for permanent storage.
 class CaptureService {
   new({LookRenderer? renderer})
     : _renderer = renderer ?? LookRenderer(codec: MethodChannelCodec());
@@ -63,6 +74,7 @@ class CaptureService {
     final dateStamp = spec.dateStampDefaultOn
         ? const DateStampSettings(enabled: true)
         : null;
+    final seed = math.Random().nextDouble() * 1000;
 
     final renderFuture = _renderer
         .render(
@@ -70,6 +82,7 @@ class CaptureService {
           spec: spec,
           outPath: outPath,
           flashFired: flashFired,
+          seed: seed,
           dateStamp: dateStamp,
         )
         .then(
@@ -77,6 +90,9 @@ class CaptureService {
             originalPath: originalPath,
             renderedPath: outPath,
             renderMs: result.renderMs,
+            spec: spec,
+            seed: seed,
+            dateStamp: dateStamp,
           ),
         );
 
