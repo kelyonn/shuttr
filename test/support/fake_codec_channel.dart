@@ -12,6 +12,8 @@ class FakeCodecChannel implements CodecChannel {
 
   final List<String> decodedPaths = [];
   final List<String> encodedPaths = [];
+  final List<(int width, int height)> encodedSizes = [];
+  final List<Uint8List> encodedRgba = [];
 
   @override
   Future<DecodedImage> decodeForRender(String path, int maxLongEdge) async {
@@ -37,6 +39,8 @@ class FakeCodecChannel implements CodecChannel {
     required String outPath,
   }) async {
     encodedPaths.add(outPath);
+    encodedSizes.add((width, height));
+    encodedRgba.add(rgba);
     await File(outPath).writeAsBytes([0xFF, 0xD8, 0xFF, 0xD9]);
   }
 }
