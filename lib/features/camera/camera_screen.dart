@@ -4,6 +4,9 @@ import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shuttr/app/theme.dart';
+import 'package:shuttr/features/camera/body/lcd_frame.dart';
+import 'package:shuttr/features/camera/body/look_mode_dial.dart';
 import 'package:shuttr/features/camera/camera_controller_provider.dart';
 import 'package:shuttr/features/camera/capture_service.dart';
 import 'package:shuttr/features/camera/review_screen.dart';
@@ -13,10 +16,10 @@ import 'package:shuttr/features/looks/look_spec.dart';
 import 'package:shuttr/features/looks/render/asset_image_cache.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
 
-/// S13/S14: the real camera screen. Owns app-lifecycle wiring (pause/resume
-/// the camera when backgrounded), the current look for the live preview
-/// shader, and the shutter → capture → review flow (screen flash, mirror
-/// selfie). The mode dial to switch looks lands in S16.
+/// S13/S14/S16: the real camera screen. Owns app-lifecycle wiring
+/// (pause/resume the camera when backgrounded), the current look for the
+/// live preview shader and mode dial, the body colour theme, and the
+/// shutter → capture → review flow (screen flash, mirror selfie).
 class CameraScreen extends ConsumerStatefulWidget {
   const new({super.key});
 
@@ -26,9 +29,10 @@ class CameraScreen extends ConsumerStatefulWidget {
 
 class _CameraScreenState extends ConsumerState<CameraScreen>
     with WidgetsBindingObserver {
-  // S16 adds the mode dial that changes this; Digi '03 is the hero free
-  // look and first entry in the registry, so it's the sensible default.
-  final LookSpec _selectedLook = looks.first;
+  // Digi '03 is the hero free look and first entry in the registry, so
+  // it's the sensible default; the mode dial changes this.
+  LookSpec _selectedLook = looks.first;
+  CameraBodyTheme _bodyTheme = CameraBodyTheme.chrome;
   final _captureService = CaptureService();
   final _screenFlash = ScreenFlashController();
 
@@ -129,10 +133,17 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
               data: (data) => _CameraReady(
                 camState: data,
                 spec: _selectedLook,
+                bodyTheme: _bodyTheme,
                 busy: _busy,
                 countdown: _countdown,
                 frontScreenFlashOn: _frontScreenFlashOn,
                 mirrorSelfieMode: _mirrorSelfieMode,
+                onSelectLook: (look) => setState(() => _selectedLook = look),
+                onToggleBodyTheme: () => setState(
+                  () => _bodyTheme = _bodyTheme == CameraBodyTheme.chrome
+                      ? CameraBodyTheme.pastel
+                      : CameraBodyTheme.chrome,
+                ),
                 onSwitchLens: () =>
                     ref.read(cameraControllerProvider.notifier).switchLens(),
                 onCycleFlash: () => ref
@@ -162,10 +173,13 @@ class _CameraReady extends StatelessWidget {
   const new({
     required this.camState,
     required this.spec,
+    required this.bodyTheme,
     required this.busy,
     required this.countdown,
     required this.frontScreenFlashOn,
     required this.mirrorSelfieMode,
+    required this.onSelectLook,
+    required this.onToggleBodyTheme,
     required this.onSwitchLens,
     required this.onCycleFlash,
     required this.onToggleFrontScreenFlash,
@@ -175,10 +189,13 @@ class _CameraReady extends StatelessWidget {
 
   final CameraControllerState camState;
   final LookSpec spec;
+  final CameraBodyTheme bodyTheme;
   final bool busy;
   final int? countdown;
   final bool frontScreenFlashOn;
   final bool mirrorSelfieMode;
+  final ValueChanged<LookSpec> onSelectLook;
+  final VoidCallback onToggleBodyTheme;
   final VoidCallback onSwitchLens;
   final VoidCallback onCycleFlash;
   final VoidCallback onToggleFrontScreenFlash;
@@ -191,6 +208,15 @@ class _CameraReady extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         _ShaderCameraPreview(camState: camState, spec: spec),
+        LcdFrame(bodyColor: bodyTheme.bodyColor),
+        Positioned(
+          top: 16,
+          left: 16,
+          child: _RoundIconButton(
+            icon: Icons.palette_outlined,
+            onPressed: onToggleBodyTheme,
+          ),
+        ),
         Positioned(
           top: 16,
           right: 16,
@@ -218,9 +244,18 @@ class _CameraReady extends StatelessWidget {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 32,
-          child: Center(
-            child: _ShutterButton(onPressed: busy ? null : onShutter),
+          bottom: 16,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LookModeDial(
+                selected: spec,
+                accentColor: bodyTheme.accentColor,
+                onSelect: onSelectLook,
+              ),
+              const SizedBox(height: 16),
+              _ShutterButton(onPressed: busy ? null : onShutter),
+            ],
           ),
         ),
       ],
@@ -245,8 +280,10 @@ class _ShaderCameraPreview extends StatefulWidget {
 class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
   ui.FragmentProgram? _program;
   ui.Image? _lut;
+  String? _lutSpecId;
   ui.FragmentShader? _shader;
   Size? _boundPhysicalSize;
+  String? _boundSpecId;
 
   @override
   void initState() {
@@ -254,8 +291,20 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     unawaited(_loadAssets());
   }
 
+  @override
+  void didUpdateWidget(covariant _ShaderCameraPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The mode dial (S16) can change the look between builds — reload its
+    // LUT so the preview doesn't keep grading with the previous look's.
+    if (oldWidget.spec.id != widget.spec.id) {
+      unawaited(_loadAssets());
+    }
+  }
+
   Future<void> _loadAssets() async {
-    final program = await ui.FragmentProgram.fromAsset('shaders/preview.frag');
+    final specId = widget.spec.id;
+    final program =
+        _program ?? await ui.FragmentProgram.fromAsset('shaders/preview.frag');
     final lut = await AssetImageCache.load(
       widget.spec.lutAsset ?? 'assets/luts/identity.png',
     );
@@ -263,20 +312,28 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     setState(() {
       _program = program;
       _lut = lut;
+      _lutSpecId = specId;
     });
   }
 
   /// (Re)binds the shader when the rendered preview's physical pixel size
-  /// changes (rotation, first layout). `uSize` in preview.frag divides
-  /// `FlutterFragCoord()`, which is in physical pixels, so this must be the
-  /// preview's on-screen size times the device pixel ratio — needs
-  /// confirming on-device that the vignette centres correctly (no way to
-  /// visually verify a fragment shader from this session).
+  /// changes (rotation, first layout) or the selected look changes.
+  /// `uSize` in preview.frag divides `FlutterFragCoord()`, which is in
+  /// physical pixels, so this must be the preview's on-screen size times
+  /// the device pixel ratio — needs confirming on-device that the vignette
+  /// centres correctly (no way to visually verify a fragment shader from
+  /// this session).
   void _bindShaderFor(Size physicalSize) {
     final program = _program;
     final lut = _lut;
-    if (program == null || lut == null) return;
-    if (_shader != null && _boundPhysicalSize == physicalSize) return;
+    if (program == null || lut == null || _lutSpecId != widget.spec.id) {
+      return;
+    }
+    if (_shader != null &&
+        _boundPhysicalSize == physicalSize &&
+        _boundSpecId == widget.spec.id) {
+      return;
+    }
 
     _shader?.dispose();
     final shader = program.fragmentShader();
@@ -293,6 +350,7 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     shader.setImageSampler(1, lut);
     _shader = shader;
     _boundPhysicalSize = physicalSize;
+    _boundSpecId = widget.spec.id;
   }
 
   @override
