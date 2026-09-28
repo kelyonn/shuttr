@@ -5,15 +5,18 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shuttr/features/camera/camera_controller_provider.dart';
+import 'package:shuttr/features/camera/capture_service.dart';
+import 'package:shuttr/features/camera/review_screen.dart';
+import 'package:shuttr/features/camera/screen_flash_overlay.dart';
 import 'package:shuttr/features/looks/look_registry.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
 import 'package:shuttr/features/looks/render/asset_image_cache.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
 
-/// S13: the real camera screen. Owns app-lifecycle wiring (pause/resume the
-/// camera when backgrounded) and picks the current look for the live
-/// preview shader; the mode dial to switch looks lands in S16, capture and
-/// the developing/review flow in S14.
+/// S13/S14: the real camera screen. Owns app-lifecycle wiring (pause/resume
+/// the camera when backgrounded), the current look for the live preview
+/// shader, and the shutter → capture → review flow (screen flash, mirror
+/// selfie). The mode dial to switch looks lands in S16.
 class CameraScreen extends ConsumerStatefulWidget {
   const new({super.key});
 
@@ -26,6 +29,13 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   // S16 adds the mode dial that changes this; Digi '03 is the hero free
   // look and first entry in the registry, so it's the sensible default.
   final LookSpec _selectedLook = looks.first;
+  final _captureService = CaptureService();
+  final _screenFlash = ScreenFlashController();
+
+  bool _frontScreenFlashOn = false;
+  bool _mirrorSelfieMode = false;
+  int? _countdown;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -36,6 +46,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _screenFlash.dispose();
     super.dispose();
   }
 
@@ -54,6 +65,56 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     }
   }
 
+  Future<void> _runCountdown(int seconds) async {
+    for (var i = seconds; i > 0; i--) {
+      if (!mounted) return;
+      setState(() => _countdown = i);
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    if (mounted) setState(() => _countdown = null);
+  }
+
+  Future<void> _handleShutter() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final notifier = ref.read(cameraControllerProvider.notifier);
+      if (_mirrorSelfieMode) {
+        if (ref.read(cameraControllerProvider).value?.lensDirection !=
+            CameraLensDirection.back) {
+          await notifier.switchLens();
+        }
+        await _runCountdown(3);
+      }
+
+      final camState = ref.read(cameraControllerProvider).value;
+      if (camState == null) return;
+
+      final useScreenFlash =
+          camState.lensDirection == CameraLensDirection.front &&
+          _frontScreenFlashOn;
+      final flashFired =
+          _mirrorSelfieMode ||
+          camState.flashMode != FlashMode.off ||
+          useScreenFlash;
+
+      final pending = await _captureService.capture(
+        controller: camState.controller,
+        spec: _selectedLook,
+        flashFired: flashFired,
+        beforeCapture: useScreenFlash ? _screenFlash.engage : null,
+        afterCapture: useScreenFlash ? _screenFlash.disengage : null,
+      );
+
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => ReviewScreen(pending: pending)),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cameraState = ref.watch(cameraControllerProvider);
@@ -61,19 +122,36 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: cameraState.when(
-          data: (data) => _CameraReady(
-            camState: data,
-            spec: _selectedLook,
-            onSwitchLens: () =>
-                ref.read(cameraControllerProvider.notifier).switchLens(),
-            onCycleFlash: () =>
-                ref.read(cameraControllerProvider.notifier).cycleFlashMode(),
-          ),
-          loading: () => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-          error: (error, _) => _CameraError(error: error),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            cameraState.when(
+              data: (data) => _CameraReady(
+                camState: data,
+                spec: _selectedLook,
+                busy: _busy,
+                countdown: _countdown,
+                frontScreenFlashOn: _frontScreenFlashOn,
+                mirrorSelfieMode: _mirrorSelfieMode,
+                onSwitchLens: () =>
+                    ref.read(cameraControllerProvider.notifier).switchLens(),
+                onCycleFlash: () => ref
+                    .read(cameraControllerProvider.notifier)
+                    .cycleFlashMode(),
+                onToggleFrontScreenFlash: () => setState(
+                  () => _frontScreenFlashOn = !_frontScreenFlashOn,
+                ),
+                onToggleMirrorSelfie: () =>
+                    setState(() => _mirrorSelfieMode = !_mirrorSelfieMode),
+                onShutter: _handleShutter,
+              ),
+              loading: () => const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+              error: (error, _) => _CameraError(error: error),
+            ),
+            ScreenFlashOverlay(controller: _screenFlash),
+          ],
         ),
       ),
     );
@@ -84,14 +162,28 @@ class _CameraReady extends StatelessWidget {
   const new({
     required this.camState,
     required this.spec,
+    required this.busy,
+    required this.countdown,
+    required this.frontScreenFlashOn,
+    required this.mirrorSelfieMode,
     required this.onSwitchLens,
     required this.onCycleFlash,
+    required this.onToggleFrontScreenFlash,
+    required this.onToggleMirrorSelfie,
+    required this.onShutter,
   });
 
   final CameraControllerState camState;
   final LookSpec spec;
+  final bool busy;
+  final int? countdown;
+  final bool frontScreenFlashOn;
+  final bool mirrorSelfieMode;
   final VoidCallback onSwitchLens;
   final VoidCallback onCycleFlash;
+  final VoidCallback onToggleFrontScreenFlash;
+  final VoidCallback onToggleMirrorSelfie;
+  final VoidCallback onShutter;
 
   @override
   Widget build(BuildContext context) {
@@ -103,24 +195,32 @@ class _CameraReady extends StatelessWidget {
           top: 16,
           right: 16,
           child: _TopControls(
-            flashMode: camState.flashMode,
-            showFlash: camState.supportsFlash,
+            camState: camState,
+            frontScreenFlashOn: frontScreenFlashOn,
+            mirrorSelfieMode: mirrorSelfieMode,
             onCycleFlash: onCycleFlash,
             onSwitchLens: onSwitchLens,
+            onToggleFrontScreenFlash: onToggleFrontScreenFlash,
+            onToggleMirrorSelfie: onToggleMirrorSelfie,
           ),
         ),
+        if (countdown != null)
+          Center(
+            child: Text(
+              '$countdown',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 96,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         Positioned(
           left: 0,
           right: 0,
           bottom: 32,
           child: Center(
-            child: _ShutterButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Capture lands in S14')),
-                );
-              },
-            ),
+            child: _ShutterButton(onPressed: busy ? null : onShutter),
           ),
         ),
       ],
@@ -243,18 +343,24 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
 
 class _TopControls extends StatelessWidget {
   const new({
-    required this.flashMode,
-    required this.showFlash,
+    required this.camState,
+    required this.frontScreenFlashOn,
+    required this.mirrorSelfieMode,
     required this.onCycleFlash,
     required this.onSwitchLens,
+    required this.onToggleFrontScreenFlash,
+    required this.onToggleMirrorSelfie,
   });
 
-  final FlashMode flashMode;
-  final bool showFlash;
+  final CameraControllerState camState;
+  final bool frontScreenFlashOn;
+  final bool mirrorSelfieMode;
   final VoidCallback onCycleFlash;
   final VoidCallback onSwitchLens;
+  final VoidCallback onToggleFrontScreenFlash;
+  final VoidCallback onToggleMirrorSelfie;
 
-  IconData get _flashIcon => switch (flashMode) {
+  IconData get _backFlashIcon => switch (camState.flashMode) {
     FlashMode.off => Icons.flash_off,
     FlashMode.auto => Icons.flash_auto,
     FlashMode.always || FlashMode.torch => Icons.flash_on,
@@ -262,11 +368,25 @@ class _TopControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFront = camState.lensDirection == CameraLensDirection.front;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (showFlash)
-          _RoundIconButton(icon: _flashIcon, onPressed: onCycleFlash),
+        if (camState.supportsFlash)
+          _RoundIconButton(icon: _backFlashIcon, onPressed: onCycleFlash),
+        if (isFront)
+          _RoundIconButton(
+            icon: frontScreenFlashOn ? Icons.flash_on : Icons.flash_off,
+            onPressed: onToggleFrontScreenFlash,
+          ),
+        const SizedBox(width: 12),
+        _RoundIconButton(
+          icon: mirrorSelfieMode
+              ? Icons.flip_camera_android
+              : Icons.flip_camera_android_outlined,
+          onPressed: onToggleMirrorSelfie,
+        ),
         const SizedBox(width: 12),
         _RoundIconButton(
           icon: Icons.cameraswitch_outlined,
@@ -299,7 +419,7 @@ class _RoundIconButton extends StatelessWidget {
 class _ShutterButton extends StatelessWidget {
   const new({required this.onPressed});
 
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -314,9 +434,9 @@ class _ShutterButton extends StatelessWidget {
         ),
         child: Container(
           margin: const EdgeInsets.all(4),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white,
+            color: onPressed == null ? Colors.white38 : Colors.white,
           ),
         ),
       ),
