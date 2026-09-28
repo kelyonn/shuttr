@@ -269,7 +269,19 @@ class _CameraReady extends StatelessWidget {
                 onSelect: onSelectLook,
               ),
               const SizedBox(height: 16),
-              _ShutterButton(onPressed: busy ? null : onShutter),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  _ShutterButton(onPressed: busy ? null : onShutter),
+                  Positioned(
+                    left: 32,
+                    child: _RoundIconButton(
+                      icon: Icons.photo_library_outlined,
+                      onPressed: () => context.push(AppRoutes.gallery),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
