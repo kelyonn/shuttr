@@ -8,6 +8,24 @@ import 'package:shuttr/core/storage/photo_meta.dart';
 import 'package:shuttr/features/looks/date_stamp.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
 
+/// A stored photo's [PhotoMeta] plus the on-disk paths the gallery (S18)
+/// needs to actually display and act on it. `originalPath` may not exist —
+/// Settings' "Clear originals" (S17) removes those files without touching
+/// `meta/`.
+class StoredPhoto {
+  const new({
+    required this.meta,
+    required this.photoPath,
+    required this.originalPath,
+  });
+
+  final PhotoMeta meta;
+  final String photoPath;
+  final String originalPath;
+
+  bool get hasOriginal => File(originalPath).existsSync();
+}
+
 /// The app's permanent photo storage (docs/ARCHITECTURE.md "Storage"), all
 /// under the app documents directory:
 /// - `photos/<id>.jpg` — the rendered look, shown by the in-app gallery.
@@ -90,6 +108,42 @@ class PhotoStore {
     await _saveToGallery(photoPath, album: 'Shuttr');
 
     return meta;
+  }
+
+  /// Every stored photo, newest first, for the in-app gallery (S18).
+  Future<List<StoredPhoto>> listAll() async {
+    final metaDir = await _dir('meta');
+    final photosDir = await _dir('photos');
+    final originalsDir = await _dir('originals');
+
+    final photos = <StoredPhoto>[];
+    await for (final entity in metaDir.list()) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      final meta = PhotoMeta.fromJson(
+        jsonDecode(await entity.readAsString()) as Map<String, dynamic>,
+      );
+      photos.add(
+        StoredPhoto(
+          meta: meta,
+          photoPath: '${photosDir.path}/${meta.id}.jpg',
+          originalPath: '${originalsDir.path}/${meta.id}.jpg',
+        ),
+      );
+    }
+    photos.sort((a, b) => b.meta.capturedAt.compareTo(a.meta.capturedAt));
+    return photos;
+  }
+
+  /// Deletes a photo's `photos/`, `originals/` and `meta/` entries. The
+  /// gallery's own copy only — a photo saved to the OS gallery via `gal`
+  /// has no delete API and is untouched.
+  Future<void> deletePhoto(String id) async {
+    for (final dirName in ['photos', 'originals', 'meta']) {
+      final dir = await _dir(dirName);
+      final ext = dirName == 'meta' ? 'json' : 'jpg';
+      final file = File('${dir.path}/$id.$ext');
+      if (file.existsSync()) await file.delete();
+    }
   }
 
   /// Total size of everything in `originals/` — what "Clear originals" in

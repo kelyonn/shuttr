@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shuttr/features/camera/camera_screen.dart';
+import 'package:shuttr/features/gallery/gallery_screen.dart';
 import 'package:shuttr/features/looks/tuning/tuning_screen.dart';
 import 'package:shuttr/features/settings/settings_screen.dart';
 
@@ -8,7 +8,7 @@ import 'package:shuttr/features/settings/settings_screen.dart';
 ///
 /// Real screens land feature-by-feature per docs/BUILD_PLAN.md:
 /// - `/camera`  → S13, done (camera screen)
-/// - `/gallery` → S18 (in-app gallery)
+/// - `/gallery` → S18, done (in-app gallery)
 /// - `/settings` → S17, done (settings screen)
 /// - `/debug/tuning` → S5, kDebugMode only
 abstract final class AppRoutes {
@@ -27,7 +27,7 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: AppRoutes.gallery,
-      builder: (context, state) => const _PlaceholderScreen(title: 'Gallery'),
+      builder: (context, state) => const GalleryScreen(),
     ),
     GoRoute(
       path: AppRoutes.settings,
@@ -39,19 +39,3 @@ final appRouter = GoRouter(
     ),
   ],
 );
-
-/// Scaffolding-only placeholder. Each route above is replaced by its real
-/// screen in the session that builds that feature (docs/BUILD_PLAN.md).
-class _PlaceholderScreen extends StatelessWidget {
-  const new({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(child: Text('$title screen — not built yet')),
-    );
-  }
-}
