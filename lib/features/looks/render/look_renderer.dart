@@ -5,7 +5,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shuttr/core/platform/codec_channel.dart';
+import 'package:shuttr/features/looks/date_stamp.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
+import 'package:shuttr/features/looks/render/frame_composite.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
 
 class RenderResult {
@@ -19,8 +21,8 @@ class RenderResult {
 /// Pipeline (docs/ARCHITECTURE.md "Photo pipeline"):
 /// native decode (downsampled) → crop to aspect → two cheap blur passes
 /// (small blur for sharpen/softness, a bright/heavy blur approximating
-/// bloom) → the look.frag uber-shader → (date stamp + frame land in S8,
-/// not yet wired here) → native JPEG encode.
+/// bloom) → the look.frag uber-shader → frame + date stamp composited on a
+/// Canvas (docs/LOOKS.md stage 10) → native JPEG encode.
 class LookRenderer {
   new({required this._codec});
 
@@ -28,6 +30,7 @@ class LookRenderer {
 
   static ui.FragmentProgram? _lookProgramCache;
   static final Map<String, ui.Image> _lutCache = {};
+  static final Map<String, ui.Image> _frameCache = {};
 
   Future<RenderResult> render({
     required String sourcePath,
@@ -35,6 +38,8 @@ class LookRenderer {
     required String outPath,
     bool flashFired = false,
     double? seed,
+    DateStampSettings? dateStamp,
+    DateTime? captureDate,
   }) async {
     final stopwatch = Stopwatch()..start();
 
@@ -74,12 +79,20 @@ class LookRenderer {
     blurSmall.dispose();
     bloomSource.dispose();
 
-    final byteData = await graded.toByteData(
-      
+    final composed = await _compositeOverlays(
+      graded,
+      spec: spec,
+      dateStamp: dateStamp,
+      captureDate: captureDate ?? DateTime.now(),
     );
-    final width = graded.width;
-    final height = graded.height;
-    graded.dispose();
+    if (!identical(composed, graded)) {
+      graded.dispose();
+    }
+
+    final byteData = await composed.toByteData();
+    final width = composed.width;
+    final height = composed.height;
+    composed.dispose();
 
     if (byteData == null) {
       throw StateError('Failed to read rendered image bytes');
@@ -182,6 +195,81 @@ class LookRenderer {
     final frame = await codec.getNextFrame();
     _lutCache[path] = frame.image;
     return frame.image;
+  }
+
+  Future<ui.Image> _loadFrame(String assetPath) async {
+    final cached = _frameCache[assetPath];
+    if (cached != null) return cached;
+
+    final bytes = await rootBundle.load(assetPath);
+    final codec = await ui.instantiateImageCodec(
+      bytes.buffer.asUint8List(),
+    );
+    final frame = await codec.getNextFrame();
+    _frameCache[assetPath] = frame.image;
+    return frame.image;
+  }
+
+  /// Composites the look's frame asset (if any) and date stamp (if enabled)
+  /// onto [image]. Returns [image] itself, untouched, when neither applies
+  /// — the common case (free looks, no date stamp by default) skips the
+  /// extra canvas pass entirely.
+  Future<ui.Image> _compositeOverlays(
+    ui.Image image, {
+    required LookSpec spec,
+    required DateStampSettings? dateStamp,
+    required DateTime captureDate,
+  }) async {
+    final needsDateStamp = dateStamp != null && dateStamp.enabled;
+    final frameAsset = spec.frameAsset;
+    if (frameAsset == null && !needsDateStamp) return image;
+
+    final photoW = image.width.toDouble();
+    final photoH = image.height.toDouble();
+
+    ui.Image? frame;
+    var canvasSize = ui.Size(photoW, photoH);
+    var windowRect = ui.Rect.fromLTWH(0, 0, photoW, photoH);
+    if (frameAsset != null) {
+      frame = await _loadFrame(frameAsset);
+      canvasSize = frameCanvasSize(photoWidth: photoW, photoHeight: photoH);
+      windowRect = frameWindowRect(photoWidth: photoW, photoHeight: photoH);
+    }
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+
+    if (frame != null) {
+      canvas.drawImageRect(
+        frame,
+        ui.Rect.fromLTWH(
+          0,
+          0,
+          frame.width.toDouble(),
+          frame.height.toDouble(),
+        ),
+        ui.Rect.fromLTWH(0, 0, canvasSize.width, canvasSize.height),
+        ui.Paint(),
+      );
+    }
+    canvas.drawImageRect(
+      image,
+      ui.Rect.fromLTWH(0, 0, photoW, photoH),
+      windowRect,
+      ui.Paint(),
+    );
+
+    if (needsDateStamp) {
+      paintDateStamp(canvas, canvasSize, captureDate, dateStamp);
+    }
+
+    final picture = recorder.endRecording();
+    final result = picture.toImageSync(
+      canvasSize.width.round(),
+      canvasSize.height.round(),
+    );
+    picture.dispose();
+    return result;
   }
 
   Future<ui.FragmentProgram> _loadLookProgram() {
