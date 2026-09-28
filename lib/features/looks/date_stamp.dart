@@ -30,6 +30,18 @@ class DateStampSettings {
     this.yearOverride,
   });
 
+  /// Persisted in a photo's `meta/<id>.json` sidecar (docs/ARCHITECTURE.md)
+  /// so re-develop can reproduce the same stamp later.
+  factory fromJson(Map<String, dynamic> json) => DateStampSettings(
+    enabled: json['enabled'] as bool,
+    format: DateStampFormat.values.byName(json['format'] as String),
+    position: DateStampPosition.values.byName(json['position'] as String),
+    colorStyle: DateStampColorStyle.values.byName(
+      json['colorStyle'] as String,
+    ),
+    yearOverride: json['yearOverride'] as int?,
+  );
+
   final bool enabled;
   final DateStampFormat format;
   final DateStampPosition position;
@@ -39,6 +51,14 @@ class DateStampSettings {
   /// (docs/LOOKS.md "custom date year" — an authenticity control users can
   /// set in Settings, not a way to falsify EXIF/metadata).
   final int? yearOverride;
+
+  Map<String, dynamic> toJson() => {
+    'enabled': enabled,
+    'format': format.name,
+    'position': position.name,
+    'colorStyle': colorStyle.name,
+    if (yearOverride != null) 'yearOverride': yearOverride,
+  };
 }
 
 /// Formats `date` per `settings.format`, substituting
