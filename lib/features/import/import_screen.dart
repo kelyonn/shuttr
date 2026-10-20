@@ -214,7 +214,7 @@ class _Progress extends StatelessWidget {
               alignment: Alignment.center,
               background: Palette.ink,
               child: Text(
-                'VIEW ROLL',
+                'VIEW GALLERY',
                 style: Typo.labelBold.copyWith(
                   fontSize: 12,
                   color: Palette.paper,
