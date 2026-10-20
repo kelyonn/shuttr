@@ -75,6 +75,36 @@ class CodecPlugin : FlutterPlugin, MethodCallHandler {
                     }
                 }
             }
+            "readCaptureDate" -> {
+                val path = call.argument<String>("path")
+                if (path == null) {
+                    result.error("bad_args", "path is required", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        result.postSuccess(readCaptureDate(path))
+                    } catch (e: Exception) {
+                        // Unreadable EXIF just means "no date".
+                        result.postSuccess(null)
+                    }
+                }
+            }
+            "readFlashFired" -> {
+                val path = call.argument<String>("path")
+                if (path == null) {
+                    result.error("bad_args", "path is required", null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        result.postSuccess(readFlashFired(path))
+                    } catch (e: Exception) {
+                        // Unreadable EXIF just means "unknown".
+                        result.postSuccess(null)
+                    }
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -132,6 +162,25 @@ class CodecPlugin : FlutterPlugin, MethodCallHandler {
         bitmap.recycle()
 
         return mapOf("rgba" to rgba, "width" to width, "height" to height)
+    }
+
+    /// EXIF capture time in epoch millis, or null. EXIF dates have no time
+    /// zone, so they're read as local time (what the camera's clock showed).
+    private fun readCaptureDate(path: String): Long? {
+        val exif = ExifInterface(path)
+        val raw = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+            ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+            ?: return null
+        val format = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+        return format.parse(raw)?.time
+    }
+
+    /// Whether EXIF says the flash fired (bit 0 of the Flash tag), or null
+    /// when the tag is absent.
+    private fun readFlashFired(path: String): Boolean? {
+        val flash = ExifInterface(path).getAttributeInt(ExifInterface.TAG_FLASH, -1)
+        if (flash < 0) return null
+        return (flash and 1) == 1
     }
 
     private fun encodeJpeg(
