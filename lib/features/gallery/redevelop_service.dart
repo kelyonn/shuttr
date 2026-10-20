@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
-import 'package:shuttr/core/platform/codec_channel.dart';
 import 'package:shuttr/core/storage/photo_meta.dart';
 import 'package:shuttr/core/storage/photo_store.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
@@ -25,7 +24,7 @@ class RedevelopService {
     LookRenderer? renderer,
     PhotoStore? photoStore,
     Future<Directory> Function()? temporaryDirectory,
-  }) : _renderer = renderer ?? LookRenderer(codec: MethodChannelCodec()),
+  }) : _renderer = renderer ?? LookRenderer.device(),
        _photoStore = photoStore ?? PhotoStore(),
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory;
 
@@ -57,6 +56,9 @@ class RedevelopService {
       outPath: outPath,
       seed: photo.meta.seed,
       dateStamp: photo.meta.dateStamp,
+      captureDate: photo.meta.capturedAt,
+      flashFired: photo.meta.flashFired,
+      happyAccidents: photo.meta.accidents,
     );
 
     final meta = await _photoStore.save(
@@ -66,6 +68,9 @@ class RedevelopService {
       seed: photo.meta.seed,
       dateStamp: photo.meta.dateStamp,
       source: photo.meta.source,
+      flashFired: photo.meta.flashFired,
+      accidents: photo.meta.accidents,
+      capturedAt: photo.meta.capturedAt,
     );
 
     final tempFile = File(outPath);
