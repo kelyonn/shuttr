@@ -48,4 +48,13 @@ class FakeCodecChannel implements CodecChannel {
     encodedRgba.add(rgba);
     await File(outPath).writeAsBytes([0xFF, 0xD8, 0xFF, 0xD9]);
   }
+
+  @override
+  Future<DateTime?> readCaptureDate(String path) async => null;
+
+  /// What [readFlashFired] reports; null = the file has no flash tag.
+  bool? flashFiredResult;
+
+  @override
+  Future<bool?> readFlashFired(String path) async => flashFiredResult;
 }

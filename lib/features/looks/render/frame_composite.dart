@@ -34,3 +34,11 @@ Rect frameWindowRect({
     photoHeight,
   );
 }
+
+/// [frameWindowRect] as fractions (0-1) of the framed canvas, for UI that
+/// needs to know where the photo sits inside a displayed framed print.
+Rect frameWindowFraction() {
+  const w = 1 + 2 * sideMargin;
+  const h = 1 + topMargin + bottomMargin;
+  return const Rect.fromLTWH(sideMargin / w, topMargin / h, 1 / w, 1 / h);
+}

@@ -6,10 +6,7 @@ void main() {
     final date = DateTime(2026, 3, 7);
 
     test('yyMmDd', () {
-      final s = formatDateStamp(
-        date,
-        const DateStampSettings(enabled: true),
-      );
+      final s = formatDateStamp(date, const DateStampSettings(enabled: true));
       expect(s, "'26 03 07");
     });
 
@@ -27,10 +24,7 @@ void main() {
     test('mmDdYy', () {
       final s = formatDateStamp(
         date,
-        const DateStampSettings(
-          enabled: true,
-          format: DateStampFormat.mmDdYy,
-        ),
+        const DateStampSettings(enabled: true, format: DateStampFormat.mmDdYy),
       );
       expect(s, "03 07 '26");
     });

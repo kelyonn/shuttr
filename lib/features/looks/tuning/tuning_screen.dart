@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shuttr/core/platform/codec_channel.dart';
 import 'package:shuttr/features/looks/look_registry.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
 import 'package:shuttr/features/looks/render/look_renderer.dart';
@@ -26,7 +25,7 @@ class TuningScreen extends StatefulWidget {
 }
 
 class _TuningScreenState extends State<TuningScreen> {
-  final _renderer = LookRenderer(codec: MethodChannelCodec());
+  final _renderer = LookRenderer.device();
   final _picker = ImagePicker();
 
   LookSpec _spec = looks.first;
@@ -52,7 +51,7 @@ class _TuningScreenState extends State<TuningScreen> {
       final outPath = '${tempDir.path}/tuning_preview.jpg';
       // Smaller than the real output for interactive re-render speed —
       // the tuning screen cares about feel, not final resolution.
-      final previewSpec = _CopySpecAtSize.at(_spec, 1024);
+      final previewSpec = _spec.copyWith(outputLongEdge: 1024);
 
       final result = await _renderer.render(
         sourcePath: sourcePath,
@@ -94,8 +93,9 @@ class _TuningScreenState extends State<TuningScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed:
-                _sourcePath == null ? null : () => unawaited(_rerender()),
+            onPressed: _sourcePath == null
+                ? null
+                : () => unawaited(_rerender()),
           ),
         ],
       ),
@@ -156,46 +156,6 @@ class _TuningScreenState extends State<TuningScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Returns `spec` with `outputLongEdge` swapped to `longEdge`, for a faster
-/// interactive preview render than the final output size.
-extension _CopySpecAtSize on LookSpec {
-  static LookSpec at(LookSpec spec, int longEdge) {
-    return LookSpec(
-      id: spec.id,
-      version: spec.version,
-      displayName: spec.displayName,
-      isFree: spec.isFree,
-      aspectWidth: spec.aspectWidth,
-      aspectHeight: spec.aspectHeight,
-      outputLongEdge: longEdge,
-      jpegQuality: spec.jpegQuality,
-      lutAsset: spec.lutAsset,
-      frameAsset: spec.frameAsset,
-      dateStampDefaultOn: spec.dateStampDefaultOn,
-      flashStrength: spec.flashStrength,
-      flashRadius: spec.flashRadius,
-      flashFalloff: spec.flashFalloff,
-      exposure: spec.exposure,
-      contrast: spec.contrast,
-      blackLift: spec.blackLift,
-      highlightClip: spec.highlightClip,
-      lutStrength: spec.lutStrength,
-      saturation: spec.saturation,
-      bloomThreshold: spec.bloomThreshold,
-      bloomStrength: spec.bloomStrength,
-      halationStrength: spec.halationStrength,
-      vignette: spec.vignette,
-      chromaticAberration: spec.chromaticAberration,
-      softness: spec.softness,
-      grainAmount: spec.grainAmount,
-      grainSize: spec.grainSize,
-      chromaNoise: spec.chromaNoise,
-      sharpenAmount: spec.sharpenAmount,
-      lightLeakStrength: spec.lightLeakStrength,
     );
   }
 }
