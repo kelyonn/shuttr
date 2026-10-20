@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 /// docs/LOOKS.md "Date stamp styles".
@@ -14,10 +13,10 @@ enum DateStampColorStyle { orange, yellow, white }
 
 extension DateStampColorStyleColor on DateStampColorStyle {
   Color get color => switch (this) {
-        DateStampColorStyle.orange => const Color(0xFFFF8A00),
-        DateStampColorStyle.yellow => const Color(0xFFF5D90A),
-        DateStampColorStyle.white => const Color(0xFFF5F5F5),
-      };
+    DateStampColorStyle.orange => const Color(0xFFFF8A00),
+    DateStampColorStyle.yellow => const Color(0xFFF5D90A),
+    DateStampColorStyle.white => const Color(0xFFF5F5F5),
+  };
 }
 
 @immutable
@@ -36,9 +35,7 @@ class DateStampSettings {
     enabled: json['enabled'] as bool,
     format: DateStampFormat.values.byName(json['format'] as String),
     position: DateStampPosition.values.byName(json['position'] as String),
-    colorStyle: DateStampColorStyle.values.byName(
-      json['colorStyle'] as String,
-    ),
+    colorStyle: DateStampColorStyle.values.byName(json['colorStyle'] as String),
     yearOverride: json['yearOverride'] as int?,
   );
 
@@ -116,21 +113,23 @@ void paintDateStamp(
   if (!settings.enabled) return;
 
   final text = formatDateStamp(date, settings);
-  final fontSize = imageSize.shortestSide * 0.035;
+  final fontSize = imageSize.shortestSide * 0.026;
+  // Subtle on purpose: readable up close, not shouting from across the frame.
   final glowColor = settings.colorStyle.color;
+  final inkColor = glowColor.withValues(alpha: 0.72);
 
   final textPainter = TextPainter(
     text: TextSpan(
       text: text,
       style: TextStyle(
-        color: glowColor,
+        color: inkColor,
         fontSize: fontSize,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.5,
+        fontWeight: FontWeight.w400,
+        letterSpacing: 1.2,
         shadows: [
           Shadow(
-            color: glowColor.withValues(alpha: 0.8),
-            blurRadius: fontSize * 0.3,
+            color: glowColor.withValues(alpha: 0.3),
+            blurRadius: fontSize * 0.2,
           ),
         ],
       ),
@@ -141,17 +140,17 @@ void paintDateStamp(
   final margin = imageSize.shortestSide * 0.04;
   final offset = switch (settings.position) {
     DateStampPosition.bottomRight => Offset(
-        imageSize.width - textPainter.width - margin,
-        imageSize.height - textPainter.height - margin,
-      ),
+      imageSize.width - textPainter.width - margin,
+      imageSize.height - textPainter.height - margin,
+    ),
     DateStampPosition.bottomLeft => Offset(
-        margin,
-        imageSize.height - textPainter.height - margin,
-      ),
+      margin,
+      imageSize.height - textPainter.height - margin,
+    ),
     DateStampPosition.topRight => Offset(
-        imageSize.width - textPainter.width - margin,
-        margin,
-      ),
+      imageSize.width - textPainter.width - margin,
+      margin,
+    ),
   };
 
   textPainter.paint(canvas, offset);

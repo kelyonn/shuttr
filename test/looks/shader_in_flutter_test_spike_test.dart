@@ -8,6 +8,8 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shuttr/features/looks/render/shader_uniforms.dart';
+import 'package:shuttr/features/looks/specs/identity.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,43 +25,28 @@ void main() {
     final source = await _solidImage(2, 2, 0xFFFF8800);
     final lut = await _solidImage(33 * 33, 33, 0xFFFFFFFF);
 
-    var i = 0;
-    void f(double v) => shader.setFloat(i++, v);
-    f(2); // uSize.x
-    f(2); // uSize.y
-    f(0); // uFlashFired
-    f(0); // uFlashStrength
-    f(0.6); // uFlashRadius
-    f(2); // uFlashFalloff
-    f(0); // uExposure
-    f(1); // uContrast
-    f(0); // uBlackLift
-    f(1); // uHighlightClip
-    f(1); // uLutStrength
-    f(33); // uLutSize
-    f(1); // uSaturation
-    f(0); // uBloomStrength
-    f(0); // uHalationStrength
-    f(0); // uVignette
-    f(0); // uChromaticAberration
-    f(0); // uSoftness
-    f(0); // uGrainAmount
-    f(1); // uGrainSize
-    f(0); // uChromaNoise
-    f(0); // uSharpenAmount
-    f(1); // uSeed
-
-    shader
-      ..setImageSampler(0, source)
-      ..setImageSampler(1, source)
-      ..setImageSampler(2, source)
-      ..setImageSampler(3, lut);
+    bindLookUniforms(
+      shader,
+      spec: identityLook,
+      width: 2,
+      height: 2,
+      flashFired: false,
+      seed: 1,
+    );
+    bindLookSamplers(
+      shader,
+      image: source,
+      blurSmall: source,
+      bloom: source,
+      lut: lut,
+      leak: source,
+      smear: source,
+    );
 
     final recorder = ui.PictureRecorder();
-    ui.Canvas(recorder).drawRect(
-      const ui.Rect.fromLTWH(0, 0, 2, 2),
-      ui.Paint()..shader = shader,
-    );
+    ui.Canvas(
+      recorder,
+    ).drawRect(const ui.Rect.fromLTWH(0, 0, 2, 2), ui.Paint()..shader = shader);
     final picture = recorder.endRecording();
     final image = picture.toImageSync(2, 2);
 

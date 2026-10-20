@@ -28,7 +28,7 @@ BOTTOM_MARGIN = 0.22
 PHOTO = 1000
 
 BORDER_COLOR = (250, 247, 240, 255)  # off-white paper, not pure white
-SHADOW_COLOR = (0, 0, 0, 40)  # subtle inner shadow around the photo window
+SHADOW_COLOR = (0, 0, 0, 18)  # subtle inner shadow around the photo window
 
 
 def main() -> None:
