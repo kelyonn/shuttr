@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shuttr — camera</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bodoni+Moda:opsz,wght@6..96,500&family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Courier+Prime&family=IBM+Plex+Mono:wght@400;500&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: #c9c3b6; color: #161513; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; border-radius: 0; text-align: left; }
+  button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+  img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 62% 38%; }
+  .is-flipped { transform: scaleX(-1); }
+
+  .board { padding: 36px 28px 64px; }
+  .kicker { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; }
+  h1 { margin: 0; font-size: 32px; font-weight: 500; letter-spacing: -0.03em; }
+  .deck { max-width: 640px; margin: 10px 0 28px; font-size: 15px; line-height: 1.45; }
+  .slots { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; }
+  .slot { flex: none; width: 312px; }
+  .slot h2 { margin: 0 0 8px; font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.16em; }
+  .clip { width: 312px; height: 676px; overflow: hidden; }
+  .clip .phone { transform: scale(0.8); transform-origin: top left; }
+  .phone {
+    width: 390px; height: 844px; position: relative; overflow: hidden;
+    border: 1px solid #161513; user-select: none;
+    display: flex; flex-direction: column; background: #e5e0d4; color: #111;
+  }
+
+  .burst { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 4; }
+  .burst.is-hot { opacity: 0.92; z-index: 12; }
+  .count {
+    display: none; position: absolute; inset: 0; z-index: 7; pointer-events: none;
+    align-items: center; justify-content: center;
+  }
+  .phone[data-counting="1"] .count,
+  .phone[data-counting="2"] .count,
+  .phone[data-counting="3"] .count { display: flex; }
+  .count span { font-family: "Bodoni Moda", serif; font-size: 120px; line-height: 1; color: transparent; -webkit-text-stroke: 2px #f4f0e6; }
+  .live-stamp, .review-stamp {
+    position: absolute; z-index: 3; color: #e25a1c;
+    font-family: "Space Mono", monospace; font-size: 12px; letter-spacing: 0.06em;
+  }
+  .live-stamp { display: none; right: 12px; bottom: 16px; }
+  .phone[data-stamp="on"] .live-stamp { display: block; }
+  .review-stamp { right: 12px; bottom: 12px; }
+  .review-stamp[hidden] { display: none !important; }
+  .phone[data-lens="front"] .live-img { transform: scaleX(-1); }
+
+  .page { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 14px 0; }
+  .develop { display: none; position: absolute; inset: 0; z-index: 2; align-items: center; justify-content: center; background: #e5e0d4; }
+  .phone[data-developing="on"] .develop { display: flex; }
+  .phone[data-developing="on"] .review-ui { visibility: hidden; }
+  .phone[data-from-gallery="on"] [data-retake],
+  .phone[data-from-gallery="on"] [data-keep],
+  .phone[data-from-gallery="off"] [data-back],
+  .phone[data-from-gallery="off"] [data-discard],
+  .phone[data-gate="off"] .gate { display: none; }
+  .roll { flex: 1; overflow: auto; }
+  .empty { margin: 24px 0; font-size: 14px; }
+
+  .stage { flex: 1; min-height: 0; display: flex; position: relative; background: #141210; }
+  .head {
+    position: absolute; top: 0; left: 0; right: 18px; height: 32px; z-index: 3;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
+    color: #f3ebdd; font-family: "Courier Prime", monospace; font-size: 12px;
+  }
+  .photo { flex: 1; min-height: 0; margin-top: 32px; position: relative; background: #111; }
+  .sprocket {
+    width: 18px; flex: none; margin-top: 32px; background: #141210;
+    display: flex; flex-direction: column; justify-content: space-evenly; align-items: center;
+  }
+  .sprocket i { width: 8px; height: 8px; background: #f3ebdd; border-radius: 50%; }
+
+  .rule { height: 4px; background: #111; flex: none; }
+  .dash { flex: none; display: flex; flex-direction: column; padding: 12px 16px 0; }
+  .kicker-line { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.16em; }
+  .headline { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; }
+  .word-ui { margin: 0; font-family: "Anton", sans-serif; font-weight: 400; font-size: 72px; line-height: 0.8; }
+  .sub { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 500; font-size: 32px; line-height: 1; margin-top: 2px; }
+  .note { margin: 6px 0 0; font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.12em; }
+  .shoot {
+    width: 64px; height: 64px; flex: none; background: #111; color: #e5e0d4; text-align: center;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.12em;
+  }
+  .shoot:active { background: #c4372a; }
+  .index { margin: 12px -16px 0; border-top: 1px solid #111; }
+  .index-toggle {
+    width: 100%; min-height: 48px; padding: 0 16px;
+    display: flex; align-items: center; border-bottom: 1px solid #111;
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+  }
+  .index-toggle b { font-weight: 500; letter-spacing: 0.14em; }
+  .index-toggle span { margin-left: 16px; }
+  .index-toggle i { font-style: normal; margin-left: auto; font-size: 9px; letter-spacing: 0.12em; }
+  .index-list { display: none; grid-template-columns: 1fr 1fr; }
+  .phone[data-cameras="on"] .index-list { display: grid; }
+  .index-list button { min-height: 48px; padding: 0 16px; display: flex; align-items: center; border-bottom: 1px solid #111; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .index-list button:nth-child(odd) { border-right: 1px solid #111; }
+  .index-list button i { font-style: normal; margin-left: auto; font-size: 9px; letter-spacing: 0.12em; }
+  .index-list button.is-on { background: #111; color: #e5e0d4; }
+  .foot { margin: 0 -16px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #111; }
+  .foot button {
+    min-height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; text-align: center; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.08em; line-height: 1;
+  }
+  .foot button + button { border-left: 1px solid #111; }
+  .foot button.is-on { background: #111; color: #e5e0d4; }
+
+  .page h3 { margin: 8px 0; font-family: "Anton", sans-serif; font-size: 72px; line-height: 0.8; font-weight: 400; }
+  .page .back { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; }
+  .opt { width: 100%; min-height: 48px; border-top: 1px solid #111; display: flex; justify-content: space-between; align-items: center; font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+  .opt.is-on { background: #111; color: #e5e0d4; padding: 0 8px; }
+  .roll { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #111; align-content: start; }
+  .roll button { border-bottom: 1px solid #111; border-right: 1px solid #111; }
+  .roll img { height: 120px; }
+  .roll span { display: block; padding: 4px 6px; font-family: "IBM Plex Mono", monospace; font-size: 10px; }
+  .review-img { height: 460px; margin: 0 -14px; width: calc(100% + 28px); }
+  .review-name { font-family: "Anton", sans-serif; font-size: 48px; margin: 8px 0 0; font-weight: 400; }
+  .gate { font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.4; }
+  .review-actions { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #111; margin-top: auto; }
+  .review-actions button { min-height: 52px; text-align: center; font-family: "IBM Plex Mono", monospace; letter-spacing: 0.12em; }
+  .review-actions button + button { border-left: 1px solid #111; }
+  .develop span { font-family: "Anton", sans-serif; font-size: 48px; background: #111; color: #e5e0d4; padding: 4px 10px; }
+  .review-ui { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+</style>
+</head>
+<body>
+<main class="board">
+  <p class="kicker">Shuttr · camera</p>
+  <h1>Camera</h1>
+  <p class="deck">Camera, roll, settings, and the frame waiting to be kept. They share one state.</p>
+  <div class="slots" data-board>
+  <section class="slot">
+    <h2>CAMERA</h2>
+    <div class="clip">
+  <article class="phone" data-phone data-page="camera">
+    <div class="stage">
+      <div class="head">
+        <span>SHUTTR</span>
+        <span>NO.<span data-bind="frame">018</span></span>
+        <span data-bind="lens">REAR</span>
+      </div>
+      <div class="photo">
+        <img class="live-img" src="viewfinder.jpg" alt="">
+        <span class="live-stamp">'26 09 28</span>
+      </div>
+      <div class="sprocket" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="rule"></div>
+    <div class="dash">
+      <div class="kicker-line" data-bind="kicker">CAMERA  /  01</div>
+      <div class="headline">
+        <h2 class="word-ui" data-bind="display">DIGI</h2>
+        <button class="shoot" type="button" data-shutter>SHOOT</button>
+      </div>
+      <div class="sub" data-bind="sub">'03</div>
+      <p class="note" data-bind="note">FREE CAMERA</p>
+      <div class="index">
+        <button class="index-toggle" type="button" data-cameras>
+          <b>CAMERAS</b>
+          <span data-bind="full">Digi '03</span>
+          <i data-bind="cameras">OPEN</i>
+        </button>
+        <div class="index-list">
+          <button class="is-on" type="button" data-mode="0">01  Digi '03</button>
+          <button type="button" data-mode="1">02  Disposable</button>
+          <button type="button" data-mode="2">03  Instant<i>LOCK</i></button>
+          <button type="button" data-mode="3">04  35<i>LOCK</i></button>
+        </div>
+      </div>
+      <div class="foot">
+        <button type="button" data-go="gallery">ROLL</button>
+        <button type="button" data-flash>FLASH<span data-bind="flash">OFF</span></button>
+        <button type="button" data-lens>LENS<span data-bind="lens">REAR</span></button>
+        <button type="button" data-go="settings">INDEX</button>
+      </div>
+    </div>
+    <div class="count"><span data-bind="count"></span></div>
+    <div class="burst"></div>
+  </article>
+    </div>
+  </section>
+  <section class="slot">
+    <h2>ROLL</h2>
+    <div class="clip">
+  <article class="phone" data-phone data-page="gallery">
+    <div class="page">
+      <button class="back" type="button" data-go="camera">BACK</button>
+      <h3>ROLL</h3>
+      <div class="roll" data-roll></div>
+    </div>
+  </article>
+    </div>
+  </section>
+  <section class="slot">
+    <h2>SETTINGS</h2>
+    <div class="clip">
+  <article class="phone" data-phone data-page="settings">
+    <div class="page">
+      <button class="back" type="button" data-go="camera">BACK</button>
+      <h3>SET</h3>
+      <button class="opt" type="button" data-stamp-btn>DATE STAMP <span data-bind="stamp">OFF</span></button>
+      <button class="opt" type="button" data-save-btn>MIRROR FRONT <span data-bind="mirrorSave">OFF</span></button>
+      <button class="opt" type="button" data-mirror>MIRROR COUNT <span data-bind="mirror">OFF</span></button>
+    </div>
+  </article>
+    </div>
+  </section>
+  <section class="slot">
+    <h2>REVIEW</h2>
+    <div class="clip">
+  <article class="phone" data-phone data-page="review">
+    <div class="page">
+      <div class="develop"><span>DEVELOPING</span></div>
+      <div class="review-ui">
+        <div style="position:relative">
+          <img class="review-img" src="viewfinder.jpg" alt="">
+          <span class="review-stamp">'26 09 28</span>
+        </div>
+        <p class="review-name"></p>
+        <p class="gate"></p>
+        <div class="review-actions">
+          <button type="button" data-retake>RETAKE</button>
+          <button type="button" data-keep>KEEP</button>
+          <button type="button" data-back>BACK</button>
+          <button type="button" data-discard>DISCARD</button>
+        </div>
+      </div>
+    </div>
+  </article>
+    </div>
+  </section>
+  </div>
+</main>
+<script>
+  const MODES = [
+    { display: "DIGI", sub: "'03", full: "Digi '03", stroke: "DIGI", mark: "03", kicker: "CAMERA  /  01", free: true },
+    { display: "DISP", sub: "ONE", full: "Disposable", stroke: "FILM", mark: "DS", kicker: "CAMERA  /  02", free: true },
+    { display: "INST", sub: "NOW", full: "Instant", stroke: "INST", mark: "IN", kicker: "CAMERA  /  03", free: false },
+    { display: "35", sub: "MM", full: "Point & Shoot 35", stroke: "35", mark: "35", kicker: "CAMERA  /  04", free: false },
+  ];
+  const FLASH = ["OFF", "AUTO", "ON"];
+
+  function pad(n) { return String(n).padStart(3, "0"); }
+  function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  function fresh() {
+    return {
+      screen: "camera",
+      mode: 0,
+      flash: 0,
+      lens: "rear",
+      mirror: false,
+      stamp: false,
+      mirrorSave: false,
+      body: "bone",
+      frame: 18,
+      gate: false,
+      cameras: false,
+      fromGallery: false,
+      developing: false,
+      counting: 0,
+      busy: false,
+      reviewing: { n: 18, mode: 0, pos: "62% 38%", lens: "rear", stamp: true, mirrorSave: false },
+      roll: [
+        { n: 16, mode: 0, pos: "24% 78%", lens: "rear", stamp: true, mirrorSave: false },
+        { n: 17, mode: 1, pos: "78% 36%", lens: "rear", stamp: false, mirrorSave: false },
+      ],
+    };
+  }
+
+  function flashText(s) {
+    if (s.lens === "front") return s.flash ? "ON" : "OFF";
+    return FLASH[s.flash];
+  }
+
+  function paint(board) {
+    const s = board._s;
+    const mode = MODES[s.mode];
+    board.querySelectorAll("[data-phone]").forEach((phone) => {
+    phone.dataset.lens = s.lens;
+    phone.dataset.stamp = s.stamp ? "on" : "off";
+    phone.dataset.body = s.body;
+    phone.dataset.counting = s.counting ? String(s.counting) : "";
+    phone.dataset.gate = s.gate ? "on" : "off";
+    phone.dataset.cameras = s.cameras ? "on" : "off";
+    phone.dataset.developing = s.developing ? "on" : "off";
+    phone.dataset.fromGallery = s.fromGallery ? "on" : "off";
+
+    const map = {
+      display: mode.display,
+      sub: mode.sub,
+      full: mode.full,
+      stroke: mode.stroke,
+      mark: mode.mark,
+      kicker: mode.kicker,
+      lens: s.lens === "front" ? "FRONT" : "REAR",
+      flash: flashText(s),
+      mirror: s.mirror ? "ON" : "OFF",
+      stamp: s.stamp ? "ON" : "OFF",
+      mirrorSave: s.mirrorSave ? "ON" : "OFF",
+      frame: pad(s.frame),
+      note: mode.free ? "FREE CAMERA" : "PREVIEW ONLY",
+      cameras: s.cameras ? "CLOSE" : "OPEN",
+      count: s.counting ? String(s.counting) : "",
+    };
+    phone.querySelectorAll("[data-bind]").forEach((el) => {
+      const key = el.getAttribute("data-bind");
+      if (map[key] != null) el.textContent = map[key];
+    });
+    phone.querySelectorAll("[data-mode]").forEach((btn) => {
+      btn.classList.toggle("is-on", Number(btn.dataset.mode) === s.mode);
+    });
+    phone.querySelectorAll("[data-flash]").forEach((btn) => btn.classList.toggle("is-on", s.flash > 0));
+    phone.querySelectorAll("[data-lens]").forEach((btn) => btn.classList.toggle("is-on", s.lens === "front"));
+    phone.querySelectorAll("[data-mirror]").forEach((btn) => btn.classList.toggle("is-on", s.mirror));
+    phone.querySelectorAll("[data-stamp-btn]").forEach((btn) => btn.classList.toggle("is-on", s.stamp));
+    phone.querySelectorAll("[data-save-btn]").forEach((btn) => btn.classList.toggle("is-on", s.mirrorSave));
+    phone.querySelectorAll("[data-body]").forEach((btn) => btn.classList.toggle("is-on", btn.dataset.body === s.body));
+
+    const shot = s.reviewing;
+    phone.querySelectorAll(".review-name").forEach((el) => {
+      el.textContent = shot ? MODES[shot.mode].full : "";
+    });
+    phone.querySelectorAll(".gate").forEach((el) => {
+      el.textContent = s.gate && shot
+        ? MODES[shot.mode].full + " can be previewed. Keeping it needs the unlock."
+        : "";
+    });
+    phone.querySelectorAll(".review-img").forEach((img) => {
+      if (!shot) return;
+      img.style.objectPosition = shot.pos;
+      img.classList.toggle("is-flipped", shot.lens === "front" && shot.mirrorSave);
+    });
+    phone.querySelectorAll(".review-stamp").forEach((el) => {
+      el.hidden = !(shot && shot.stamp);
+    });
+    phone.querySelectorAll(".latest").forEach((img) => {
+      const latest = s.roll[0];
+      img.style.objectPosition = latest ? latest.pos : "50% 50%";
+      img.style.visibility = latest ? "visible" : "hidden";
+    });
+
+    const host = phone.querySelector("[data-roll]");
+    if (!host) return;
+    if (!s.roll.length) {
+      host.innerHTML = '<p class="empty">No frames on this roll.</p>';
+      return;
+    }
+    host.innerHTML = s.roll.map((frame, index) => {
+      const flip = frame.lens === "front" && frame.mirrorSave ? " is-flipped" : "";
+      return '<button type="button" data-open="' + index + '"><img class="' + flip + '" alt="" src="viewfinder.jpg" style="object-position:' + frame.pos + '"><span>' + pad(frame.n) + "  " + MODES[frame.mode].full + "</span></button>";
+    }).join("");
+    });
+  }
+
+  async function shoot(board) {
+    const s = board._s;
+    if (s.busy) return;
+    s.busy = true;
+    if (s.mirror) {
+      s.lens = "rear";
+      for (const n of [3, 2, 1]) {
+        s.counting = n;
+        paint(board);
+        await wait(650);
+      }
+      s.counting = 0;
+      paint(board);
+    }
+    const burst = board.querySelector(".burst");
+    const long = s.lens === "front" && s.flash > 0;
+    burst.classList.add("is-hot");
+    await wait(long ? 340 : 90);
+    burst.classList.remove("is-hot");
+    s.reviewing = {
+      mode: s.mode,
+      lens: s.lens,
+      pos: "62% 38%",
+      stamp: s.stamp,
+      mirrorSave: s.mirrorSave,
+      n: s.frame,
+    };
+    s.fromGallery = false;
+    s.gate = false;
+    s.developing = true;
+    paint(board);
+    await wait(680);
+    s.developing = false;
+    paint(board);
+    s.busy = false;
+  }
+
+  const board = document.querySelector("[data-board]");
+  board._s = fresh();
+  paint(board);
+  window.__shuttr = { board, paint, fresh, MODES, FLASH };
+  board.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button || !board.contains(button)) return;
+      const s = board._s;
+      if (button.hasAttribute("data-cameras")) {
+        s.cameras = !s.cameras;
+        paint(board);
+        return;
+      }
+      if (button.dataset.mode != null) {
+        s.mode = Number(button.dataset.mode);
+        s.gate = false;
+        s.cameras = false;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-flash")) {
+        s.flash = s.lens === "front" ? (s.flash ? 0 : 1) : (s.flash + 1) % 3;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-lens")) {
+        s.lens = s.lens === "rear" ? "front" : "rear";
+        if (s.lens === "front" && s.flash === 2) s.flash = 1;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-mirror")) {
+        s.mirror = !s.mirror;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-stamp-btn")) {
+        s.stamp = !s.stamp;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-save-btn")) {
+        s.mirrorSave = !s.mirrorSave;
+        paint(board);
+        return;
+      }
+      if (button.dataset.body) {
+        s.body = button.dataset.body;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-body-cycle")) {
+        const bodies = ["bone", "chrome", "pastel"];
+        s.body = bodies[(bodies.indexOf(s.body) + 1) % bodies.length];
+        paint(board);
+        return;
+      }
+      if (button.dataset.go) {
+        return;
+      }
+      if (button.dataset.open != null) {
+        s.reviewing = s.roll[Number(button.dataset.open)];
+        s.fromGallery = true;
+        s.gate = false;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-shutter")) {
+        shoot(board);
+        return;
+      }
+      if (button.hasAttribute("data-retake")) {
+        s.reviewing = null;
+        s.gate = false;
+        s.fromGallery = false;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-keep")) {
+        if (!s.reviewing) return;
+        if (!MODES[s.reviewing.mode].free) {
+          s.gate = true;
+          paint(board);
+          return;
+        }
+        s.roll.unshift(s.reviewing);
+        s.frame += 1;
+        s.reviewing = null;
+        s.gate = false;
+        s.fromGallery = false;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-back")) {
+        s.reviewing = null;
+        s.gate = false;
+        s.fromGallery = false;
+        paint(board);
+        return;
+      }
+      if (button.hasAttribute("data-discard")) {
+        if (s.reviewing) s.roll = s.roll.filter((frame) => frame !== s.reviewing);
+        s.reviewing = null;
+        s.fromGallery = false;
+        paint(board);
+      }
+  });
+</script>
+</body>
+</html>

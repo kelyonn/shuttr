@@ -29,4 +29,13 @@ jobs:
             exit 1
           fi
 
+      # No real brand names in user-visible strings or assets (rule 4).
+      # Comments may mention a stock for tuning intent, so skip comment lines.
+      - name: Guard against brand names
+        run: |
+          if grep -rEi '(kodak|fuji|polaroid|portra|canon|sony|nikon|instax)' lib assets --include='*.dart' --include='*.json' | grep -Ev ':[[:space:]]*//'; then
+            echo "Real brand name found in lib/ or assets/." >&2
+            exit 1
+          fi
+
       - run: flutter test
