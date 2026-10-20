@@ -34,33 +34,36 @@ void main() {
     );
   }
 
-  test('writes photos/, originals/ and meta/ under the documents dir', () async {
-    final store = buildStore();
+  test(
+    'writes photos/, originals/ and meta/ under the documents dir',
+    () async {
+      final store = buildStore();
 
-    final meta = await store.save(
-      originalCapturePath: 'fake_original.jpg',
-      renderedPath: renderedPath,
-      spec: identityLook,
-      seed: 7,
-    );
+      final meta = await store.save(
+        originalCapturePath: 'fake_original.jpg',
+        renderedPath: renderedPath,
+        spec: identityLook,
+        seed: 7,
+      );
 
-    expect(
-      File('${tempDir.path}/photos/${meta.id}.jpg').existsSync(),
-      isTrue,
-    );
-    expect(
-      File('${tempDir.path}/originals/${meta.id}.jpg').existsSync(),
-      isTrue,
-    );
-    final metaFile = File('${tempDir.path}/meta/${meta.id}.json');
-    expect(metaFile.existsSync(), isTrue);
+      expect(
+        File('${tempDir.path}/photos/${meta.id}.jpg').existsSync(),
+        isTrue,
+      );
+      expect(
+        File('${tempDir.path}/originals/${meta.id}.jpg').existsSync(),
+        isTrue,
+      );
+      final metaFile = File('${tempDir.path}/meta/${meta.id}.json');
+      expect(metaFile.existsSync(), isTrue);
 
-    final decoded = PhotoMeta.fromJson(
-      jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>,
-    );
-    expect(decoded.lookId, identityLook.id);
-    expect(decoded.seed, 7);
-  });
+      final decoded = PhotoMeta.fromJson(
+        jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>,
+      );
+      expect(decoded.lookId, identityLook.id);
+      expect(decoded.seed, 7);
+    },
+  );
 
   test('saves the rendered photo to the gallery Shuttr album', () async {
     final store = buildStore();

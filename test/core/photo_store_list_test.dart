@@ -78,4 +78,37 @@ void main() {
     expect(all.single.meta.id, meta.id);
     expect(all.single.hasOriginal, isFalse);
   });
+
+  test('a trashed photo leaves the list and comes back on restore', () async {
+    final store = buildStore();
+    final meta = await store.save(
+      originalCapturePath: 'a.jpg',
+      renderedPath: renderedPath,
+      spec: identityLook,
+    );
+
+    await store.trashPhoto(meta.id);
+    expect(await store.listAll(), isEmpty);
+
+    await store.restorePhoto(meta.id);
+    final back = await store.listAll();
+    expect(back.single.meta.id, meta.id);
+    expect(File(back.single.photoPath).existsSync(), isTrue);
+    expect(back.single.hasOriginal, isTrue);
+  });
+
+  test('emptying the trash makes a delete permanent', () async {
+    final store = buildStore();
+    final meta = await store.save(
+      originalCapturePath: 'a.jpg',
+      renderedPath: renderedPath,
+      spec: identityLook,
+    );
+
+    await store.trashPhoto(meta.id);
+    await store.emptyTrash();
+    await store.restorePhoto(meta.id);
+
+    expect(await store.listAll(), isEmpty);
+  });
 }

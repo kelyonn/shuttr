@@ -18,6 +18,9 @@ class PhotoMeta {
     required this.source,
     this.seed,
     this.dateStamp,
+    this.flashFired = false,
+    this.accidents = false,
+    this.developed = true,
   });
 
   factory fromJson(Map<String, dynamic> json) => PhotoMeta(
@@ -29,9 +32,10 @@ class PhotoMeta {
     seed: (json['seed'] as num?)?.toDouble(),
     dateStamp: json['dateStamp'] == null
         ? null
-        : DateStampSettings.fromJson(
-            json['dateStamp'] as Map<String, dynamic>,
-          ),
+        : DateStampSettings.fromJson(json['dateStamp'] as Map<String, dynamic>),
+    flashFired: json['flashFired'] as bool? ?? false,
+    accidents: json['accidents'] as bool? ?? false,
+    developed: json['developed'] as bool? ?? true,
   );
 
   final String id;
@@ -45,6 +49,29 @@ class PhotoMeta {
   final double? seed;
   final DateStampSettings? dateStamp;
 
+  /// Kept so a re-develop renders the flash the shot actually had.
+  final bool flashFired;
+
+  /// Whether Happy Accidents was on (re-develop reproduces the same ones).
+  final bool accidents;
+
+  /// False while the frame sits on an unfinished roll (Roll mode): stored,
+  /// but hidden and not yet in the phone gallery.
+  final bool developed;
+
+  PhotoMeta copyWith({bool? developed}) => PhotoMeta(
+    id: id,
+    lookId: lookId,
+    lookVersion: lookVersion,
+    capturedAt: capturedAt,
+    source: source,
+    seed: seed,
+    dateStamp: dateStamp,
+    flashFired: flashFired,
+    accidents: accidents,
+    developed: developed ?? this.developed,
+  );
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'lookId': lookId,
@@ -53,5 +80,8 @@ class PhotoMeta {
     'source': source.name,
     if (seed != null) 'seed': seed,
     if (dateStamp != null) 'dateStamp': dateStamp!.toJson(),
+    'flashFired': flashFired,
+    'accidents': accidents,
+    'developed': developed,
   };
 }

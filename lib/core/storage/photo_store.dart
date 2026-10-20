@@ -1,12 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shuttr/core/platform/codec_channel.dart';
 import 'package:shuttr/core/storage/photo_meta.dart';
 import 'package:shuttr/features/looks/date_stamp.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
+
+/// Bumped when a photo comes back from the trash, so an open gallery can
+/// refresh itself.
+final ValueNotifier<int> photoStoreRevision = ValueNotifier<int>(0);
 
 /// A stored photo's [PhotoMeta] plus the on-disk paths the gallery (S18)
 /// needs to actually display and act on it. `originalPath` may not exist —
@@ -71,6 +76,10 @@ class PhotoStore {
     double? seed,
     DateStampSettings? dateStamp,
     PhotoSource source = PhotoSource.capture,
+    bool flashFired = false,
+    bool accidents = false,
+    bool developed = true,
+    DateTime? capturedAt,
   }) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
 
@@ -95,23 +104,54 @@ class PhotoStore {
       id: id,
       lookId: spec.id,
       lookVersion: spec.version,
-      capturedAt: DateTime.now(),
+      capturedAt: capturedAt ?? DateTime.now(),
       source: source,
       seed: seed,
       dateStamp: dateStamp,
+      flashFired: flashFired,
+      accidents: accidents,
+      developed: developed,
     );
-    final metaDir = await _dir('meta');
-    await File(
-      '${metaDir.path}/$id.json',
-    ).writeAsString(jsonEncode(meta.toJson()));
+    await _writeMeta(meta);
 
-    await _saveToGallery(photoPath, album: 'Shuttr');
+    // A frame on an unfinished roll stays out of the phone gallery until
+    // the roll is developed (Roll mode).
+    if (developed) await _saveToGallery(photoPath, album: 'Shuttr');
 
     return meta;
   }
 
+  Future<void> _writeMeta(PhotoMeta meta) async {
+    final metaDir = await _dir('meta');
+    await File('${metaDir.path}/${meta.id}.json')
+        .writeAsString(jsonEncode(meta.toJson()));
+  }
+
+  /// Develops the roll: every frame still on it becomes visible and goes to
+  /// the phone gallery, oldest first. Returns how many were developed.
+  Future<int> developRoll() async {
+    final onRoll = (await listAll(includeUndeveloped: true))
+        .where((p) => !p.meta.developed)
+        .toList()
+        .reversed;
+    var n = 0;
+    for (final photo in onRoll) {
+      await _saveToGallery(photo.photoPath, album: 'Shuttr');
+      await _writeMeta(photo.meta.copyWith(developed: true));
+      n++;
+    }
+    return n;
+  }
+
+  /// How many frames are exposed on the current (undeveloped) roll.
+  Future<int> exposuresOnRoll() async =>
+      (await listAll(includeUndeveloped: true))
+          .where((p) => !p.meta.developed)
+          .length;
+
   /// Every stored photo, newest first, for the in-app gallery (S18).
-  Future<List<StoredPhoto>> listAll() async {
+  /// Frames on an undeveloped roll are hidden unless [includeUndeveloped].
+  Future<List<StoredPhoto>> listAll({bool includeUndeveloped = false}) async {
     final metaDir = await _dir('meta');
     final photosDir = await _dir('photos');
     final originalsDir = await _dir('originals');
@@ -122,6 +162,7 @@ class PhotoStore {
       final meta = PhotoMeta.fromJson(
         jsonDecode(await entity.readAsString()) as Map<String, dynamic>,
       );
+      if (!meta.developed && !includeUndeveloped) continue;
       photos.add(
         StoredPhoto(
           meta: meta,
@@ -144,6 +185,42 @@ class PhotoStore {
       final file = File('${dir.path}/$id.$ext');
       if (file.existsSync()) await file.delete();
     }
+  }
+
+  static const _kinds = {'photos': 'jpg', 'originals': 'jpg', 'meta': 'json'};
+
+  /// Moves a photo to the trash instead of deleting it, so a delete can be
+  /// undone. The previous trash is emptied first.
+  Future<void> trashPhoto(String id) async {
+    await emptyTrash();
+    for (final entry in _kinds.entries) {
+      final dir = await _dir(entry.key);
+      final file = File('${dir.path}/$id.${entry.value}');
+      if (!file.existsSync()) continue;
+      final trash = await _dir('trash/${entry.key}');
+      await file.copy('${trash.path}/$id.${entry.value}');
+      await file.delete();
+    }
+  }
+
+  /// Puts a trashed photo back.
+  Future<void> restorePhoto(String id) async {
+    for (final entry in _kinds.entries) {
+      final trash = await _dir('trash/${entry.key}');
+      final file = File('${trash.path}/$id.${entry.value}');
+      if (!file.existsSync()) continue;
+      final dir = await _dir(entry.key);
+      await file.copy('${dir.path}/$id.${entry.value}');
+      await file.delete();
+    }
+    photoStoreRevision.value++;
+  }
+
+  /// Permanently removes whatever is in the trash.
+  Future<void> emptyTrash() async {
+    final docs = await _documentsDirectory();
+    final trash = Directory('${docs.path}/trash');
+    if (trash.existsSync()) await trash.delete(recursive: true);
   }
 
   /// Total size of everything in `originals/` — what "Clear originals" in
