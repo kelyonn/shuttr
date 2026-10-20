@@ -1,23 +1,37 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shuttr/app/router.dart';
 import 'package:shuttr/app/theme.dart';
-import 'package:shuttr/features/camera/body/lcd_frame.dart';
-import 'package:shuttr/features/camera/body/look_mode_dial.dart';
+import 'package:shuttr/core/storage/photo_store.dart';
+import 'package:shuttr/core/storage/roll_count.dart';
+import 'package:shuttr/core/ui/shuttr_route.dart';
+import 'package:shuttr/core/ui/shuttr_ui.dart';
+import 'package:shuttr/features/camera/body/camera_card.dart';
+import 'package:shuttr/features/camera/body/camera_dash.dart';
 import 'package:shuttr/features/camera/camera_controller_provider.dart';
+import 'package:shuttr/features/camera/camera_permission_view.dart';
 import 'package:shuttr/features/camera/capture_service.dart';
+import 'package:shuttr/features/camera/character/camera_haptics.dart';
+import 'package:shuttr/features/camera/coach_marks.dart';
 import 'package:shuttr/features/camera/review_screen.dart';
+import 'package:shuttr/features/camera/roll_mode.dart';
 import 'package:shuttr/features/camera/screen_flash_overlay.dart';
+import 'package:shuttr/features/camera/viewfinder_gestures.dart';
+import 'package:shuttr/features/looks/date_stamp.dart';
 import 'package:shuttr/features/looks/look_registry.dart';
 import 'package:shuttr/features/looks/look_spec.dart';
 import 'package:shuttr/features/looks/render/asset_image_cache.dart';
 import 'package:shuttr/features/looks/render/shader_uniforms.dart';
 import 'package:shuttr/features/settings/settings_repository.dart';
+import 'package:shuttr/features/video/video_looks.dart';
+import 'package:shuttr/features/video/video_review_screen.dart';
 
 /// S13/S14/S16: the real camera screen. Owns app-lifecycle wiring
 /// (pause/resume the camera when backgrounded), the current look for the
@@ -35,24 +49,76 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
   // Digi '03 is the hero free look and first entry in the registry, so
   // it's the sensible default; the mode dial changes this.
   LookSpec _selectedLook = looks.first;
-  CameraBodyTheme _bodyTheme = CameraBodyTheme.chrome;
+  bool _pickerOpen = false;
   final _captureService = CaptureService();
   final _screenFlash = ScreenFlashController();
 
+  /// Brief black-out after the shutter in roll mode: the only feedback you
+  /// get, like the mirror/shutter blinking the finder on a real camera.
+  bool _blink = false;
+
   bool _frontScreenFlashOn = false;
-  bool _mirrorSelfieMode = false;
   int? _countdown;
   bool _busy = false;
+
+  // Video mode (camcorder looks).
+  bool _video = false;
+  LookSpec _videoLook = videoPreviewLooks.first;
+  bool _recording = false;
+  DateTime? _recStart;
+  Timer? _recTimer;
+  Duration _recElapsed = Duration.zero;
+  bool _torch = false;
+  static const _maxClip = Duration(minutes: 3);
+
+  LookSpec get _activeLook => _video ? _videoLook : _selectedLook;
+
+  /// A clip that was still rolling when the app lost the camera; it's
+  /// finished and offered for review when the app comes back.
+  String? _rescuedClip;
+  DateTime? _rescuedStart;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final prefs = ref.read(sharedPreferencesProvider);
+    final photoId = prefs.getString('lastLook');
+    final videoId = prefs.getString('lastVideoLook');
+    _selectedLook = looks.firstWhere(
+      (l) => l.id == photoId,
+      orElse: () => looks.first,
+    );
+    _videoLook = videoPreviewLooks.firstWhere(
+      (l) => l.id == videoId,
+      orElse: () => videoPreviewLooks.first,
+    );
+  }
+
+  void _pickLook(LookSpec look) {
+    final prefs = ref.read(sharedPreferencesProvider);
+    setState(() {
+      if (look.id.startsWith('video_')) {
+        _videoLook = look;
+        unawaited(prefs.setString('lastVideoLook', look.id));
+      } else {
+        _selectedLook = look;
+        unawaited(prefs.setString('lastLook', look.id));
+      }
+    });
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recTimer?.cancel();
     _screenFlash.dispose();
     super.dispose();
   }
@@ -63,35 +129,138 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
     switch (state) {
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:
+        // Releasing the camera ends any recording; finish it properly so
+        // the footage isn't lost, and offer it for review on return.
+        if (_recording) unawaited(_rescueRecording());
+        if (_torch) setState(() => _torch = false);
         unawaited(notifier.pause());
       case AppLifecycleState.resumed:
-        unawaited(notifier.resume());
+        unawaited(notifier.resume().then((_) => _reviewRescuedClip()));
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         break;
     }
   }
 
-  Future<void> _runCountdown(int seconds) async {
+  Future<void> _rescueRecording() async {
+    final controller = ref.read(cameraControllerProvider).value?.controller;
+    _recTimer?.cancel();
+    final start = _recStart;
+    setState(() => _recording = false);
+    if (controller == null) return;
+    try {
+      final file = await controller.stopVideoRecording();
+      _rescuedClip = file.path;
+      _rescuedStart = start;
+    } on Object {
+      // Nothing usable was written.
+    }
+  }
+
+  Future<void> _reviewRescuedClip() async {
+    final path = _rescuedClip;
+    if (path == null || !mounted) return;
+    _rescuedClip = null;
+    await Navigator.of(context).push<bool>(
+      ShuttrRoute(
+        builder: (_) => VideoReviewScreen(
+          sourcePath: path,
+          look: videoLookForPreview(_videoLook),
+          startedAt: _rescuedStart ?? DateTime.now(),
+        ),
+      ),
+    );
+  }
+
+  bool _cancelCountdown = false;
+
+  /// Returns false if the shutter was tapped again to cancel.
+  Future<bool> _runCountdown(int seconds) async {
+    _cancelCountdown = false;
     for (var i = seconds; i > 0; i--) {
-      if (!mounted) return;
+      if (!mounted || _cancelCountdown) break;
       setState(() => _countdown = i);
       await Future<void>.delayed(const Duration(seconds: 1));
     }
+    final ok = mounted && !_cancelCountdown;
     if (mounted) setState(() => _countdown = null);
+    return ok;
+  }
+
+  Future<void> _setVideoMode(bool video) async {
+    if (video == _video || _recording) return;
+    setState(() {
+      _video = video;
+      _torch = false;
+    });
+    if (video) _snack('Clips develop into the look after you stop.');
+    await ref
+        .read(cameraControllerProvider.notifier)
+        .setVideoMode(video: video);
+  }
+
+  /// REC / STOP. Recording is plain (the preview shows a cheap version of
+  /// the look); the full camcorder look develops afterwards.
+  Future<void> _toggleRecording() async {
+    final camState = ref.read(cameraControllerProvider).value;
+    if (camState == null) return;
+    final controller = camState.controller;
+
+    if (!_recording) {
+      try {
+        await controller.startVideoRecording();
+      } on Object {
+        _snack("Couldn't start recording. Try again.");
+        return;
+      }
+      unawaited(HapticFeedback.mediumImpact());
+      setState(() {
+        _recording = true;
+        _recStart = DateTime.now();
+        _recElapsed = Duration.zero;
+      });
+      _recTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        final start = _recStart;
+        if (!mounted || start == null) return;
+        setState(() => _recElapsed = DateTime.now().difference(start));
+        if (_recElapsed >= _maxClip) unawaited(_toggleRecording());
+      });
+      return;
+    }
+
+    _recTimer?.cancel();
+    setState(() => _recording = false);
+    final XFile file;
+    try {
+      file = await controller.stopVideoRecording();
+    } on Object {
+      _snack("That clip couldn't be saved.");
+      return;
+    }
+    unawaited(HapticFeedback.mediumImpact());
+    if (!mounted) return;
+    await Navigator.of(context).push<bool>(
+      ShuttrRoute(
+        builder: (_) => VideoReviewScreen(
+          sourcePath: file.path,
+          look: videoLookForPreview(_videoLook),
+          startedAt: _recStart ?? DateTime.now(),
+        ),
+      ),
+    );
   }
 
   Future<void> _handleShutter() async {
+    if (_video) return await _toggleRecording();
+    if (_countdown != null) {
+      _cancelCountdown = true;
+      return;
+    }
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final notifier = ref.read(cameraControllerProvider.notifier);
-      if (_mirrorSelfieMode) {
-        if (ref.read(cameraControllerProvider).value?.lensDirection !=
-            CameraLensDirection.back) {
-          await notifier.switchLens();
-        }
-        await _runCountdown(3);
+      if (ref.read(settingsProvider).mirrorCount) {
+        if (!await _runCountdown(3)) return;
       }
 
       final camState = ref.read(cameraControllerProvider).value;
@@ -99,193 +268,349 @@ class _CameraScreenState extends ConsumerState<CameraScreen>
 
       final isFront = camState.lensDirection == CameraLensDirection.front;
       final useScreenFlash = isFront && _frontScreenFlashOn;
-      final flashFired =
-          _mirrorSelfieMode ||
-          camState.flashMode != FlashMode.off ||
+      // A timed shot on the rear lens is a mirror shot: the light is real.
+      final softFlash =
+          (ref.read(settingsProvider).mirrorCount && !isFront) ||
           useScreenFlash;
+      final flashFired = camState.flashMode != FlashMode.off;
       final settings = ref.read(settingsProvider);
 
+      final look = _selectedLook;
+      final nextFrame = nextFrameNumber(ref);
+      unawaited(useFrameNumber(ref, nextFrame));
+      final frameLabel = 'NO.${nextFrame.toString().padLeft(3, '0')}';
       final pending = await _captureService.capture(
         controller: camState.controller,
-        spec: _selectedLook,
+        spec: look,
         flashFired: flashFired,
+        softFlash: softFlash,
         mirror: isFront && settings.mirrorFrontPhotos,
+        happyAccidents: settings.happyAccidents,
         dateStampOverride: settings.dateStampOverride,
-        beforeCapture: useScreenFlash ? _screenFlash.engage : null,
+        beforeCapture: () async {
+          if (useScreenFlash) await _screenFlash.engage();
+          CameraHaptics.shutter();
+        },
         afterCapture: useScreenFlash ? _screenFlash.disengage : null,
       );
+      CameraHaptics.advance(look.soundSet);
 
       if (!mounted) return;
+      if (settings.rollMode) {
+        setState(() => _blink = true);
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 120)).then((_) {
+            if (mounted) setState(() => _blink = false);
+          }),
+        );
+        unawaited(_exposeOnRoll(pending));
+        return;
+      }
+
       await Navigator.of(context).push<void>(
-        MaterialPageRoute(builder: (_) => ReviewScreen(pending: pending)),
+        ShuttrRoute(
+          builder: (_) => ReviewScreen(
+            pending: pending,
+            spec: look,
+            frameLabel: frameLabel,
+          ),
+        ),
       );
+      ref
+        ..invalidate(rollCountProvider)
+        ..invalidate(latestPhotoProvider);
+    } on Object {
+      _snack("Couldn't take that photo. Try again.");
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _countdown = null;
+        });
+      }
     }
+  }
+
+  /// Roll mode: the frame develops in the background, straight onto the
+  /// roll. The last frame of the roll develops the whole thing.
+  Future<void> _exposeOnRoll(PendingCapture pending) async {
+    await RollQueue.add(pending);
+    if (!mounted) return;
+    ref.invalidate(exposuresOnRollProvider);
+    final store = PhotoStore();
+    if (await store.exposuresOnRoll() >= rollLength &&
+        inFlightFrames.value == 0) {
+      final n = await store.developRoll();
+      if (!mounted) return;
+      ref
+        ..invalidate(exposuresOnRollProvider)
+        ..invalidate(rollCountProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Roll finished. $n frames developed.')),
+      );
+    }
+  }
+
+  Future<void> _openRoll() async {
+    await context.push<void>(AppRoutes.gallery);
+    ref
+      ..invalidate(rollCountProvider)
+      ..invalidate(latestPhotoProvider);
   }
 
   @override
   Widget build(BuildContext context) {
     final cameraState = ref.watch(cameraControllerProvider);
+    final settings = ref.watch(settingsProvider);
+    final rollCount = ref.watch(rollCountProvider).value ?? 0;
+    final latestPhoto = ref.watch(latestPhotoProvider).value;
+    final paper = settings.bodyTheme.paperColor;
+    final camState = cameraState.value;
+    final isFront = camState?.lensDirection == CameraLensDirection.front;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            cameraState.when(
-              data: (data) => _CameraReady(
-                camState: data,
-                spec: _selectedLook,
-                bodyTheme: _bodyTheme,
-                busy: _busy,
-                countdown: _countdown,
-                frontScreenFlashOn: _frontScreenFlashOn,
-                mirrorSelfieMode: _mirrorSelfieMode,
-                onSelectLook: (look) => setState(() => _selectedLook = look),
-                onToggleBodyTheme: () => setState(
-                  () => _bodyTheme = _bodyTheme == CameraBodyTheme.chrome
-                      ? CameraBodyTheme.pastel
-                      : CameraBodyTheme.chrome,
-                ),
-                onSwitchLens: () =>
-                    ref.read(cameraControllerProvider.notifier).switchLens(),
-                onCycleFlash: () => ref
-                    .read(cameraControllerProvider.notifier)
-                    .cycleFlashMode(),
-                onToggleFrontScreenFlash: () => setState(
-                  () => _frontScreenFlashOn = !_frontScreenFlashOn,
-                ),
-                onToggleMirrorSelfie: () =>
-                    setState(() => _mirrorSelfieMode = !_mirrorSelfieMode),
-                onShutter: _handleShutter,
+    final String flashLabel;
+    final bool flashOn;
+    if (camState == null) {
+      flashLabel = 'OFF';
+      flashOn = false;
+    } else if (_video) {
+      flashLabel = _torch ? 'LIGHT' : 'OFF';
+      flashOn = _torch;
+    } else if (isFront) {
+      flashLabel = _frontScreenFlashOn ? 'ON' : 'OFF';
+      flashOn = _frontScreenFlashOn;
+    } else {
+      flashLabel = switch (camState.flashMode) {
+        FlashMode.off => 'OFF',
+        FlashMode.auto => 'AUTO',
+        FlashMode.always || FlashMode.torch => 'ON',
+      };
+      flashOn = camState.flashMode != FlashMode.off;
+    }
+
+    final exposed =
+        (ref.watch(exposuresOnRollProvider).value ?? 0) + inFlightFrames.value;
+    final recSeconds = (_recElapsed.inSeconds % 60).toString().padLeft(2, '0');
+    final recClock = '${_recElapsed.inMinutes}:$recSeconds';
+    final frameNo = _video
+        ? (_recording ? '● REC $recClock' : 'STBY')
+        : settings.rollMode
+        ? 'EXP ${(exposed + 1).clamp(1, rollLength).toString().padLeft(2, '0')}'
+              '/$rollLength'
+        : 'NO.${nextFrameNumber(ref).toString().padLeft(3, '0')}';
+    final previewMode =
+        _video ||
+            !settings.authenticViewfinder ||
+            _selectedLook.viewfinder == ViewfinderKind.clean
+        ? PreviewMode.look
+        : (_selectedLook.viewfinder == ViewfinderKind.lcd
+              ? PreviewMode.lcd
+              : PreviewMode.optical);
+    final lensLabel = isFront ? 'FRONT' : 'REAR';
+
+    final stamp = settings.dateStampOverride;
+    final stampText = stamp != null && stamp.enabled
+        ? formatDateStamp(DateTime.now(), stamp)
+        : null;
+
+    final photo = cameraState.when(
+      data: (data) => ValueListenableBuilder<CameraValue>(
+        // Rebuild when the phone turns, so the frame follows at once
+        // instead of keeping the previous orientation's shape.
+        valueListenable: data.controller,
+        builder: (context, value, _) {
+          final o = value.deviceOrientation;
+          final sideways =
+              o == DeviceOrientation.landscapeLeft ||
+              o == DeviceOrientation.landscapeRight;
+          // The frame is the shape the photo will be cropped to: the
+          // camera's own format, turned on its side when the phone is.
+          final ratio = _activeLook.aspectRatio;
+          return ViewfinderGestures(
+            key: ObjectKey(data.controller),
+            controller: data.controller,
+            child: CameraFrame(
+              aspect: sideways ? ratio : 1 / ratio,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _ShaderCameraPreview(
+                    camState: data,
+                    spec: _activeLook,
+                    mode: previewMode,
+                  ),
+                  if (stampText != null &&
+                      !_video &&
+                      previewMode != PreviewMode.optical)
+                    LiveStamp(stampText),
+                  if (_blink) const ColoredBox(color: Colors.black),
+                  if (_countdown != null)
+                    Center(
+                      child: Text(
+                        '$_countdown',
+                        style: Typo.display.copyWith(
+                          fontSize: 140,
+                          color: Palette.cream,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              ),
-              error: (error, _) => _CameraError(error: error),
             ),
-            ScreenFlashOverlay(controller: _screenFlash),
-          ],
+          );
+        },
+      ),
+      loading: () =>
+          const Center(child: CircularProgressIndicator(color: Palette.cream)),
+      error: (error, _) => isCameraPermissionError(error)
+          ? CameraPermissionView(
+              onRetry: () => ref.invalidate(cameraControllerProvider),
+            )
+          : _CameraError(
+              error: error,
+              onRetry: () => ref.invalidate(cameraControllerProvider),
+            ),
+    );
+    final plate = FilmPlate(
+      frameLabel: frameNo,
+      rightLabel: flashOn ? '$lensLabel · FLASH' : lensLabel,
+      photo: photo,
+    );
+
+    final dash = CameraDash(
+      spec: _activeLook,
+      lookList: _video ? videoPreviewLooks : null,
+      video: _video,
+      recording: _recording,
+      onMode: (v) => unawaited(_setVideoMode(v)),
+      pickerOpen: _pickerOpen,
+      rollCount: rollCount,
+      flashLabel: flashLabel,
+      flashOn: flashOn,
+      lensLabel: lensLabel,
+      busy: (_busy && _countdown == null) || camState == null,
+      shutterLabel: _countdown != null ? 'CANCEL' : null,
+      footLocked: _recording || _busy,
+      onTogglePicker: () => setState(() => _pickerOpen = !_pickerOpen),
+      onSelectLook: _pickLook,
+      onShutter: _handleShutter,
+      latestPhotoPath: latestPhoto,
+      timerLabel: settings.mirrorCount ? '3S' : 'OFF',
+      onTimer: () {
+        if (_recording || _busy || _video) return;
+        unawaited(
+          ref
+              .read(settingsProvider.notifier)
+              .setMirrorCount(!settings.mirrorCount),
+        );
+      },
+      onCycle: (dir) {
+        if (_recording || _busy) return;
+        final list = _video ? videoPreviewLooks : looks;
+        final i = list.indexWhere((l) => l.id == _activeLook.id);
+        _pickLook(list[(i + dir) % list.length]);
+        unawaited(HapticFeedback.selectionClick());
+      },
+      onRoll: () {
+        if (_recording || _busy) return;
+        unawaited(_openRoll());
+      },
+      onFlash: () {
+        if (_busy) return;
+        if (_video) {
+          setState(() => _torch = !_torch);
+          unawaited(
+            ref.read(cameraControllerProvider.notifier).setTorch(on: _torch),
+          );
+        } else if (isFront) {
+          setState(() => _frontScreenFlashOn = !_frontScreenFlashOn);
+        } else {
+          unawaited(
+            ref.read(cameraControllerProvider.notifier).cycleFlashMode(),
+          );
+        }
+      },
+      onLens: () {
+        if (_recording || _busy) return;
+        unawaited(ref.read(cameraControllerProvider.notifier).switchLens());
+      },
+      onIndex: () {
+        if (_recording || _busy) return;
+        unawaited(context.push<void>(AppRoutes.settings));
+      },
+      onInfo: (look) async {
+        final use = await showCameraCard(context, look);
+        if (use && mounted) _pickLook(look);
+      },
+    );
+
+    final phone = camState?.controller.value.deviceOrientation;
+    final turn = switch (phone) {
+      DeviceOrientation.landscapeLeft => 1,
+      DeviceOrientation.landscapeRight => -1,
+      DeviceOrientation.portraitDown => 2,
+      _ => 0,
+    };
+
+    return PhoneTurn(
+      quarterTurns: turn,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          systemNavigationBarColor: paper,
+          systemNavigationBarIconBrightness: Brightness.dark,
+        ),
+        child: PopScope(
+          // Back closes the camera list first, and never quits mid-recording.
+          canPop: !_pickerOpen && !_recording,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            if (_pickerOpen) {
+              setState(() => _pickerOpen = false);
+            } else {
+              _snack('Stop recording first.');
+            }
+          },
+          child: Scaffold(
+            backgroundColor: paper,
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                PlateLayout(plate: plate, panel: dash, paper: paper),
+                ScreenFlashOverlay(controller: _screenFlash),
+                const CoachMarks(),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _CameraReady extends StatelessWidget {
-  const new({
-    required this.camState,
-    required this.spec,
-    required this.bodyTheme,
-    required this.busy,
-    required this.countdown,
-    required this.frontScreenFlashOn,
-    required this.mirrorSelfieMode,
-    required this.onSelectLook,
-    required this.onToggleBodyTheme,
-    required this.onSwitchLens,
-    required this.onCycleFlash,
-    required this.onToggleFrontScreenFlash,
-    required this.onToggleMirrorSelfie,
-    required this.onShutter,
-  });
+/// Centres [child] in the plate at exactly [aspect] (width / height), as
+/// large as fits, with the dark plate showing around it. No stretching, no
+/// zoom-to-fill: the viewfinder is the frame the photo will have.
+class CameraFrame extends StatelessWidget {
+  const new({required this.aspect, required this.child, super.key});
 
-  final CameraControllerState camState;
-  final LookSpec spec;
-  final CameraBodyTheme bodyTheme;
-  final bool busy;
-  final int? countdown;
-  final bool frontScreenFlashOn;
-  final bool mirrorSelfieMode;
-  final ValueChanged<LookSpec> onSelectLook;
-  final VoidCallback onToggleBodyTheme;
-  final VoidCallback onSwitchLens;
-  final VoidCallback onCycleFlash;
-  final VoidCallback onToggleFrontScreenFlash;
-  final VoidCallback onToggleMirrorSelfie;
-  final VoidCallback onShutter;
+  final double aspect;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _ShaderCameraPreview(camState: camState, spec: spec),
-        LcdFrame(bodyColor: bodyTheme.bodyColor),
-        Positioned(
-          top: 16,
-          left: 16,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _RoundIconButton(
-                icon: Icons.palette_outlined,
-                onPressed: onToggleBodyTheme,
-              ),
-              const SizedBox(width: 12),
-              _RoundIconButton(
-                icon: Icons.settings_outlined,
-                onPressed: () => context.push(AppRoutes.settings),
-              ),
-            ],
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0x33F3EBDD)),
           ),
+          child: ClipRect(child: child),
         ),
-        Positioned(
-          top: 16,
-          right: 16,
-          child: _TopControls(
-            camState: camState,
-            frontScreenFlashOn: frontScreenFlashOn,
-            mirrorSelfieMode: mirrorSelfieMode,
-            onCycleFlash: onCycleFlash,
-            onSwitchLens: onSwitchLens,
-            onToggleFrontScreenFlash: onToggleFrontScreenFlash,
-            onToggleMirrorSelfie: onToggleMirrorSelfie,
-          ),
-        ),
-        if (countdown != null)
-          Center(
-            child: Text(
-              '$countdown',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 96,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 16,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LookModeDial(
-                selected: spec,
-                accentColor: bodyTheme.accentColor,
-                onSelect: onSelectLook,
-              ),
-              const SizedBox(height: 16),
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  _ShutterButton(onPressed: busy ? null : onShutter),
-                  Positioned(
-                    left: 32,
-                    child: _RoundIconButton(
-                      icon: Icons.photo_library_outlined,
-                      onPressed: () => context.push(AppRoutes.gallery),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -295,10 +620,11 @@ class _CameraReady extends StatelessWidget {
 /// docs/ARCHITECTURE.md "Preview light, render heavy". The full look.frag
 /// pipeline only ever runs on the captured still.
 class _ShaderCameraPreview extends StatefulWidget {
-  const new({required this.camState, required this.spec});
+  const new({required this.camState, required this.spec, required this.mode});
 
   final CameraControllerState camState;
   final LookSpec spec;
+  final PreviewMode mode;
 
   @override
   State<_ShaderCameraPreview> createState() => _ShaderCameraPreviewState();
@@ -311,6 +637,7 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
   ui.FragmentShader? _shader;
   Size? _boundPhysicalSize;
   String? _boundSpecId;
+  PreviewMode? _boundMode;
 
   @override
   void initState() {
@@ -358,7 +685,8 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     }
     if (_shader != null &&
         _boundPhysicalSize == physicalSize &&
-        _boundSpecId == widget.spec.id) {
+        _boundSpecId == widget.spec.id &&
+        _boundMode == widget.mode) {
       return;
     }
 
@@ -369,6 +697,7 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
       spec: widget.spec,
       width: physicalSize.width,
       height: physicalSize.height,
+      mode: widget.mode,
     );
     // Sampler 0 (uImage) is deliberately left unbound: ImageFilter.shader
     // auto-fills it with the filtered child's live rendered content — the
@@ -378,6 +707,7 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     _shader = shader;
     _boundPhysicalSize = physicalSize;
     _boundSpecId = widget.spec.id;
+    _boundMode = widget.mode;
   }
 
   @override
@@ -392,165 +722,82 @@ class _ShaderCameraPreviewState extends State<_ShaderCameraPreview> {
     final previewAspect = controller.value.aspectRatio;
     final dpr = MediaQuery.devicePixelRatioOf(context);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final mediaSize = constraints.biggest;
+    return ValueListenableBuilder<CameraValue>(
+      valueListenable: controller,
+      builder: (context, value, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final mediaSize = constraints.biggest;
 
-        // The size CameraPreview's own internal AspectRatio settles on
-        // when fit inside mediaSize (contain, not cover).
-        final fittedSize = mediaSize.aspectRatio > previewAspect
-            ? Size(mediaSize.height * previewAspect, mediaSize.height)
-            : Size(mediaSize.width, mediaSize.width / previewAspect);
-        _bindShaderFor(fittedSize * dpr);
+          // CameraPreview shows the sensor's landscape frame upright for the
+          // phone's current orientation: landscape aspect when the phone is
+          // sideways, the inverse when upright.
+          final orientation = value.deviceOrientation;
+          final sideways =
+              orientation == DeviceOrientation.landscapeLeft ||
+              orientation == DeviceOrientation.landscapeRight;
+          final displayAspect = sideways ? previewAspect : 1 / previewAspect;
 
-        var scale = mediaSize.aspectRatio * previewAspect;
-        if (scale < 1) scale = 1 / scale;
+          // The size CameraPreview settles on inside mediaSize (contain),
+          // then scaled up to cover the plate with no letterbox.
+          final fittedSize = mediaSize.aspectRatio > displayAspect
+              ? Size(mediaSize.height * displayAspect, mediaSize.height)
+              : Size(mediaSize.width, mediaSize.width / displayAspect);
+          _bindShaderFor(fittedSize * dpr);
 
-        final cameraPreview = CameraPreview(controller);
-        final shader = _shader;
-        final filtered = shader == null
-            ? cameraPreview
-            : ImageFiltered(
-                imageFilter: ui.ImageFilter.shader(shader),
-                child: cameraPreview,
-              );
+          final scale = math.max(
+            mediaSize.width / fittedSize.width,
+            mediaSize.height / fittedSize.height,
+          );
 
-        return ClipRect(
-          child: Transform.scale(
-            scale: scale,
-            child: Center(child: filtered),
-          ),
-        );
-      },
-    );
-  }
-}
+          final cameraPreview = CameraPreview(controller);
+          final shader = _shader;
+          final filtered = shader == null
+              ? cameraPreview
+              : ImageFiltered(
+                  imageFilter: ui.ImageFilter.shader(shader),
+                  child: cameraPreview,
+                );
 
-class _TopControls extends StatelessWidget {
-  const new({
-    required this.camState,
-    required this.frontScreenFlashOn,
-    required this.mirrorSelfieMode,
-    required this.onCycleFlash,
-    required this.onSwitchLens,
-    required this.onToggleFrontScreenFlash,
-    required this.onToggleMirrorSelfie,
-  });
-
-  final CameraControllerState camState;
-  final bool frontScreenFlashOn;
-  final bool mirrorSelfieMode;
-  final VoidCallback onCycleFlash;
-  final VoidCallback onSwitchLens;
-  final VoidCallback onToggleFrontScreenFlash;
-  final VoidCallback onToggleMirrorSelfie;
-
-  IconData get _backFlashIcon => switch (camState.flashMode) {
-    FlashMode.off => Icons.flash_off,
-    FlashMode.auto => Icons.flash_auto,
-    FlashMode.always || FlashMode.torch => Icons.flash_on,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final isFront = camState.lensDirection == CameraLensDirection.front;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (camState.supportsFlash)
-          _RoundIconButton(icon: _backFlashIcon, onPressed: onCycleFlash),
-        if (isFront)
-          _RoundIconButton(
-            icon: frontScreenFlashOn ? Icons.flash_on : Icons.flash_off,
-            onPressed: onToggleFrontScreenFlash,
-          ),
-        const SizedBox(width: 12),
-        _RoundIconButton(
-          icon: mirrorSelfieMode
-              ? Icons.flip_camera_android
-              : Icons.flip_camera_android_outlined,
-          onPressed: onToggleMirrorSelfie,
-        ),
-        const SizedBox(width: 12),
-        _RoundIconButton(
-          icon: Icons.cameraswitch_outlined,
-          onPressed: onSwitchLens,
-        ),
-      ],
-    );
-  }
-}
-
-class _RoundIconButton extends StatelessWidget {
-  const new({required this.icon, required this.onPressed});
-
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black45,
-      shape: const CircleBorder(),
-      child: IconButton(
-        icon: Icon(icon, color: Colors.white),
-        onPressed: onPressed,
-      ),
-    );
-  }
-}
-
-class _ShutterButton extends StatelessWidget {
-  const new({required this.onPressed});
-
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 4),
-        ),
-        child: Container(
-          margin: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: onPressed == null ? Colors.white38 : Colors.white,
-          ),
-        ),
+          return ClipRect(
+            child: Transform.scale(
+              scale: scale,
+              child: Center(child: filtered),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
 class _CameraError extends StatelessWidget {
-  const new({required this.error});
+  const new({required this.error, required this.onRetry});
 
   final Object error;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    // Friendlier permission-denied / no-camera copy and a way to open
-    // Settings lands in S21; for now this at least surfaces the failure
-    // instead of a blank/frozen screen.
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.no_photography, color: Colors.white54, size: 48),
+            const Icon(Icons.no_photography, color: Palette.cream, size: 48),
             const SizedBox(height: 16),
-            Text(
-              "Couldn't start the camera.\n$error",
+            const Text(
+              "Couldn't start the camera. Another app may be using it.",
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: Palette.cream),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: onRetry,
+              child: const Text(
+                'TRY AGAIN',
+                style: TextStyle(color: Palette.cream),
+              ),
             ),
           ],
         ),
