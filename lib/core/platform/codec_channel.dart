@@ -1,13 +1,8 @@
-
 import 'package:flutter/services.dart';
 
 /// Result of a native decode: raw RGBA8888 pixels plus dimensions.
 class DecodedImage {
-  const new({
-    required this.rgba,
-    required this.width,
-    required this.height,
-  });
+  const new({required this.rgba, required this.width, required this.height});
 
   final Uint8List rgba;
   final int width;
@@ -33,12 +28,20 @@ abstract class CodecChannel {
     required int quality,
     required String outPath,
   });
+
+  /// When the photo at [path] was taken, from its EXIF `DateTimeOriginal`
+  /// (falling back to `DateTime`). Null if the file has no such tag.
+  Future<DateTime?> readCaptureDate(String path);
+
+  /// Whether the camera reports that its flash fired for the photo at
+  /// [path] (EXIF `Flash` tag, bit 0). Null if the file has no such tag.
+  Future<bool?> readFlashFired(String path);
 }
 
 /// Real implementation backed by the `shuttr/codec` platform channel.
 class MethodChannelCodec implements CodecChannel {
   new({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel('shuttr/codec');
+    : _channel = channel ?? const MethodChannel('shuttr/codec');
 
   final MethodChannel _channel;
 
@@ -76,5 +79,18 @@ class MethodChannelCodec implements CodecChannel {
       'quality': quality,
       'outPath': outPath,
     });
+  }
+
+  @override
+  Future<DateTime?> readCaptureDate(String path) async {
+    final millis = await _channel.invokeMethod<int>('readCaptureDate', {
+      'path': path,
+    });
+    return millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  @override
+  Future<bool?> readFlashFired(String path) {
+    return _channel.invokeMethod<bool>('readFlashFired', {'path': path});
   }
 }

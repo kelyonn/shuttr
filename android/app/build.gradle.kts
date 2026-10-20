@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "dev.shuttr.shuttr"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -52,4 +52,8 @@ dependencies {
     // CodecPlugin.kt: EXIF orientation reading + coroutines for off-main-thread decode/encode.
     implementation("androidx.exifinterface:exifinterface:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // VideoPlugin.kt: camcorder looks rendered after recording (D-041, CLAUDE.md rule 10).
+    implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
+    implementation("androidx.media3:media3-common:1.11.1")
 }
