@@ -63,6 +63,11 @@ class CaptureService {
 
   final LookRenderer _renderer;
 
+  /// Gates when each render *starts*: a burst of shots writes its originals
+  /// immediately, but renders run one at a time behind this tail so a budget
+  /// phone never has two decode/shader/encode pipelines live at once.
+  static Future<void> _renderTail = Future.value();
+
   Future<PendingCapture> capture({
     required CameraController controller,
     required LookSpec spec,
@@ -104,17 +109,20 @@ class CaptureService {
     final seed = math.Random().nextDouble() * 1000;
     final capturedAt = DateTime.now();
 
-    final renderFuture = _renderer
-        .render(
-          sourcePath: originalPath,
-          spec: spec,
-          outPath: outPath,
-          flashFired: flashFiredForLook,
-          seed: seed,
-          dateStamp: dateStamp,
-          captureDate: capturedAt,
-          mirror: mirror,
-          happyAccidents: happyAccidents,
+    final previousRender = _renderTail;
+    final renderFuture = previousRender
+        .then(
+          (_) => _renderer.render(
+            sourcePath: originalPath,
+            spec: spec,
+            outPath: outPath,
+            flashFired: flashFiredForLook,
+            seed: seed,
+            dateStamp: dateStamp,
+            captureDate: capturedAt,
+            mirror: mirror,
+            happyAccidents: happyAccidents,
+          ),
         )
         .then(
           (result) => CaptureResult(
@@ -130,6 +138,9 @@ class CaptureService {
             mirror: mirror,
           ),
         );
+    // The tail only needs to know the slot is free again, not the result —
+    // a failed render must not jam every render behind it.
+    _renderTail = renderFuture.then((_) {}, onError: (_) {});
 
     return PendingCapture(
       originalPath: originalPath,
