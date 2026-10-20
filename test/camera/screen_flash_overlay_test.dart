@@ -14,20 +14,20 @@ void main() {
     applicationBrightness = 0.4;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
-      switch (call.method) {
-        case 'getApplicationScreenBrightness':
-          return applicationBrightness;
-        case 'setApplicationScreenBrightness':
-          final args = call.arguments as Map<Object?, Object?>;
-          applicationBrightness = args['brightness']! as double;
-          return null;
-        case 'resetApplicationScreenBrightness':
-          return null;
-        default:
-          return null;
-      }
-    });
+          calls.add(call);
+          switch (call.method) {
+            case 'getApplicationScreenBrightness':
+              return applicationBrightness;
+            case 'setApplicationScreenBrightness':
+              final args = call.arguments as Map<Object?, Object?>;
+              applicationBrightness = args['brightness']! as double;
+              return null;
+            case 'resetApplicationScreenBrightness':
+              return null;
+            default:
+              return null;
+          }
+        });
   });
 
   tearDown(() {
