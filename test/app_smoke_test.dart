@@ -13,20 +13,16 @@ void main() {
   const cameraChannel = MethodChannel('plugins.flutter.io/camera');
 
   setUp(() {
-    TestDefaultBinaryMessengerBinding
-        .instance
-        .defaultBinaryMessenger
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(cameraChannel, (call) async {
-      if (call.method == 'availableCameras') return <Object?>[];
-      return null;
-    });
-    SharedPreferences.setMockInitialValues({});
+          if (call.method == 'availableCameras') return <Object?>[];
+          return null;
+        });
+    SharedPreferences.setMockInitialValues({'onboarded': true});
   });
 
   tearDown(() {
-    TestDefaultBinaryMessengerBinding
-        .instance
-        .defaultBinaryMessenger
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(cameraChannel, null);
   });
 
