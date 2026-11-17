@@ -1,0 +1,47 @@
+# Proprietary Software License
+
+**Copyright © 2026 Sri Kalyan Ippili. All rights reserved.**
+
+This software, including its source code, fragment shaders, colour lookup
+tables, camera look specifications, documentation and associated assets
+(collectively, the “Software”), is the exclusive property of the copyright
+holder.
+
+## Grant of rights
+
+No license is granted to you by possession of this repository or any build of
+Shuttr, except the limited right to:
+
+1. Run a build of Shuttr on a device you personally own or control, for
+   personal, non-commercial use; and
+2. Read the source for personal study of how this particular application works.
+
+## Restrictions
+
+Without prior written permission from the copyright holder, you may **not**:
+
+- Copy, redistribute, publish, or publicly host the Software (source or binary)
+- Modify, adapt, translate, or create derivative works based on the Software
+- Use the Software, in whole or in part, to build another product, service,
+  filter pack, library, or commercial offering
+- Extract the camera looks, LUTs or shaders for reuse in another project
+- Remove or alter copyright, license, or attribution notices
+- Sublicense, sell, rent, lease, or transfer the Software to any third party
+- Use Shuttr’s name, branding, or sample photos to imply endorsement of another work
+
+## Third-party components
+
+Flutter, Dart packages and fonts used by Shuttr remain under their own licenses.
+
+## No warranty
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM USE OF THE SOFTWARE.
+
+## Permission requests
+
+For any use beyond personal running of the app, contact the copyright holder
+and obtain written permission first.
